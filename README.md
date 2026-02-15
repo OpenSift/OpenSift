@@ -62,17 +62,19 @@ backend/
 This gets OpenSift running locally with **no API keys required**.
 
 ### 1) Clone the repository and enter the backend
-```bash
+```
+bash
 git clone https://github.com/your-org/opensift.git
 cd opensift/backend
 ```
 ### 2) Create and activate a virtual environment
-
-```python3.13 -m venv .venv
+```
+python3.13 -m venv .venv
 source .venv/bin/activate
 ```
 ### 3) Install dependencies
-```pip install -U pip setuptools wheel
+```
+pip install -U pip setuptools wheel
 pip install -r requirements.txt
 pip install sentence-transformers
 ```
@@ -82,13 +84,15 @@ Open test_mcp_client.py and add:
 	•	PDFs / TXT / MD files (lecture notes, articles, books)
 
 Example URLs already included:
-```urls = [
+```
+urls = [
     ("Photosynthesis (Wiki)", "https://en.wikipedia.org/wiki/Photosynthesis"),
     ("Cellular respiration (Wiki)", "https://en.wikipedia.org/wiki/Cellular_respiration"),
 ]
 ```
 ### 5) Run the test client
-```python test_mcp_client.py
+```
+python test_mcp_client.py
 ```
 You should see:
 	•	MCP tools listed
@@ -106,7 +110,8 @@ The test client runs example queries like:
 	•	“Compare photosynthesis vs cellular respiration”
 
 Add your own:
-```search_queries = [
+```
+search_queries = [
     "Explain the Calvin cycle step by step",
     "Which reactions produce ATP?",
 ]
@@ -124,10 +129,12 @@ sift_generate | Retrieve + generate study content
 OpenSift works without any API keys by default.
 
 OpenAI
-```export OPENAI_API_KEY="sk-..."
+```
+export OPENAI_API_KEY="sk-..."
 ```
 Claude (Anthropic API)
-```export ANTHROPIC_API_KEY="sk-ant-..."
+```
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 Claude Code (subscription / setup-token)
 claude setup-token
@@ -135,7 +142,8 @@ export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
 unset ANTHROPIC_API_KEY
 
 Then call:
-```{
+```
+{
   "provider": "claude_code"
 }
 ```
