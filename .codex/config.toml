@@ -1,0 +1,4 @@
+[mcp_servers.opensift]
+command = "python"
+args = ["-m", "mcp_server"]
+cwd = "backend"
