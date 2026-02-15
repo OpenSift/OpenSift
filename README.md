@@ -54,3 +54,129 @@ backend/
 ├── test_mcp_client.py     # Local MCP test + ingestion script
 ├── requirements.txt
 └── .env                   # Optional secrets (ignored by git)
+
+---
+
+## ⚡ Quick Start (5 Minutes)
+
+This gets OpenSift running locally with **no API keys required**.
+
+### 1) Clone the repository and enter the backend
+```bash
+git clone https://github.com/your-org/opensift.git
+cd opensift/backend
+
+### 2) Create and activate a virtual environment
+
+```python3.13 -m venv .venv
+source .venv/bin/activate
+
+### 3) Install dependencies
+```pip install -U pip setuptools wheel
+pip install -r requirements.txt
+pip install sentence-transformers
+
+### 4) Feed OpenSift information
+Open test_mcp_client.py and add:
+	•	URLs you want to study
+	•	PDFs / TXT / MD files (lecture notes, articles, books)
+
+Example URLs already included:
+```urls = [
+    ("Photosynthesis (Wiki)", "https://en.wikipedia.org/wiki/Photosynthesis"),
+    ("Cellular respiration (Wiki)", "https://en.wikipedia.org/wiki/Cellular_respiration"),
+]
+
+### 5) Run the test client
+```python test_mcp_client.py
+
+You should see:
+	•	MCP tools listed
+	•	content ingested
+	•	successful semantic searches
+
+🎉 You are now searching your own study material.
+
+⸻
+
+### 6) Try your own searches
+
+The test client runs example queries like:
+	•	“What are the stages of photosynthesis?”
+	•	“Compare photosynthesis vs cellular respiration”
+
+Add your own:
+```search_queries = [
+    "Explain the Calvin cycle step by step",
+    "Which reactions produce ATP?",
+]
+
+### 🔍 Available MCP Tools
+
+Tool | Description
+ingest_url | Fetch and ingest a webpage
+ingest_file | Ingest PDF / TXT / MD files
+search | Semantic search over ingested content
+sift_generate | Retrieve + generate study content
+
+🔐 AI Provider Configuration (Optional)
+
+OpenSift works without any API keys by default.
+
+OpenAI
+```export OPENAI_API_KEY="sk-..."
+
+Claude (Anthropic API)
+```export ANTHROPIC_API_KEY="sk-ant-..."
+
+Claude Code (subscription / setup-token)
+claude setup-token
+export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
+unset ANTHROPIC_API_KEY
+
+Then call:
+```{
+  "provider": "claude_code"
+}
+
+🚀 Why OpenSift?
+
+Most study tools either:
+	•	summarize without grounding, or
+	•	require constant manual searching
+
+OpenSift flips that model:
+	•	You ingest everything once
+	•	You retrieve exactly what matters
+	•	AI works with your sources, not instead of them
+
+It’s built for:
+	•	exam preparation
+	•	research synthesis
+	•	large reading loads
+	•	agent-based study workflows
+
+⸻
+
+🛣️ Roadmap (High-Level)
+	•	✅ Local ingestion + semantic search
+	•	✅ No-key local embeddings
+	•	✅ MCP-based agent integration
+	•	🔜 CLI ingestion (opensift ingest)
+	•	🔜 Per-course / per-project collections
+	•	🔜 Exam mode (quizzes + flashcards)
+	•	🔜 Lightweight web UI
+
+⸻
+
+📜 License
+
+MIT
+
+⸻
+
+🙌 Acknowledgements
+	•	ChromaDB
+	•	sentence-transformers
+	•	MCP (Model Context Protocol)
+	•	OpenAI & Anthropic ecosystems
