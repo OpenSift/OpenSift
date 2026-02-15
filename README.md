@@ -54,7 +54,7 @@ backend/
 ├── test_mcp_client.py     # Local MCP test + ingestion script
 ├── requirements.txt
 └── .env                   # Optional secrets (ignored by git)
-
+```
 ---
 
 ## ⚡ Quick Start (5 Minutes)
@@ -65,17 +65,17 @@ This gets OpenSift running locally with **no API keys required**.
 ```bash
 git clone https://github.com/your-org/opensift.git
 cd opensift/backend
-
+```
 ### 2) Create and activate a virtual environment
 
 ```python3.13 -m venv .venv
 source .venv/bin/activate
-
+```
 ### 3) Install dependencies
 ```pip install -U pip setuptools wheel
 pip install -r requirements.txt
 pip install sentence-transformers
-
+```
 ### 4) Feed OpenSift information
 Open test_mcp_client.py and add:
 	•	URLs you want to study
@@ -86,10 +86,10 @@ Example URLs already included:
     ("Photosynthesis (Wiki)", "https://en.wikipedia.org/wiki/Photosynthesis"),
     ("Cellular respiration (Wiki)", "https://en.wikipedia.org/wiki/Cellular_respiration"),
 ]
-
+```
 ### 5) Run the test client
 ```python test_mcp_client.py
-
+```
 You should see:
 	•	MCP tools listed
 	•	content ingested
@@ -110,7 +110,7 @@ Add your own:
     "Explain the Calvin cycle step by step",
     "Which reactions produce ATP?",
 ]
-
+```
 ### 🔍 Available MCP Tools
 
 Tool | Description
@@ -125,10 +125,10 @@ OpenSift works without any API keys by default.
 
 OpenAI
 ```export OPENAI_API_KEY="sk-..."
-
+```
 Claude (Anthropic API)
 ```export ANTHROPIC_API_KEY="sk-ant-..."
-
+```
 Claude Code (subscription / setup-token)
 claude setup-token
 export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
@@ -138,7 +138,7 @@ Then call:
 ```{
   "provider": "claude_code"
 }
-
+```
 🚀 Why OpenSift?
 
 Most study tools either:
