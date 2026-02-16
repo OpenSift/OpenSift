@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpenSift Login</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #0b1020; color: #e9eefc; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 28px 18px; }
+      .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 18px; }
+      h1 { margin: 0 0 6px; font-size: 20px; }
+      .sub { opacity: .8; margin: 0 0 16px; }
+      label { display:block; font-size: 12px; opacity: .85; margin-top: 10px; }
+      input { width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.06); color: #e9eefc; margin-top: 6px; }
+      button { margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.10); color: #e9eefc; cursor:pointer; }
+      button.primary { background: #2a3fff; border-color: #2a3fff; color:#fff; }
+      .row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .hint { font-size: 12px; opacity: .75; margin-top: 10px; }
+      .error { background: rgba(255,70,70,.12); border: 1px solid rgba(255,70,70,.35); padding: 10px 12px; border-radius: 12px; margin: 12px 0; }
+      code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 8px; }
+      a { color: #9fb0ff; text-decoration: none; }
+      .split { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+      @media (max-width: 780px){
+        .row, .split { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>OpenSift</h1>
+        <p class="sub">Local-only access. Authenticate with a token or password.</p>
+
+        {% if error %}
+          <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if mode == "set_password" %}
+          <form method="post" action="/set-password">
+            <label>Generated Token (required to set password)</label>
+            <input name="token" placeholder="Paste generated token…" required />
+
+            <div class="row">
+              <div>
+                <label>New Password</label>
+                <input name="new_password" type="password" placeholder="At least 8 characters" required />
+              </div>
+              <div>
+                <label>Confirm Password</label>
+                <input name="confirm_password" type="password" placeholder="Repeat password" required />
+              </div>
+            </div>
+
+            <button class="primary" type="submit">Set Password & Continue</button>
+
+            <div class="hint">
+              Stores a salted password hash in <code>.opensift_auth.json</code> (backend directory).
+            </div>
+
+            <div class="hint">
+              Generated token (also printed in server logs):<br/>
+              <code>{{ token }}</code>
+            </div>
+
+            <div class="hint"><a href="/login">Back to login</a></div>
+          </form>
+
+        {% else %}
+          <form method="post" action="/login">
+            <div class="split">
+              <div>
+                <label>Login with Token</label>
+                <input name="token" placeholder="Paste generated token…" />
+              </div>
+              <div>
+                <label>Login with Password {% if not has_password %}(not set yet){% endif %}</label>
+                <input name="password" type="password" placeholder="Enter password…" {% if not has_password %}disabled{% endif %} />
+              </div>
+            </div>
+
+            <button class="primary" type="submit">Login</button>
+
+            <div class="hint">
+              Generated token (also printed in server logs):<br/>
+              <code>{{ token }}</code>
+            </div>
+
+            <div class="hint">
+              {% if has_password %}
+                Password is set. You can login with password or token.
+              {% else %}
+                Password not set yet. Login with token, then set a password:
+                <a href="/set-password">Set a password</a>
+              {% endif %}
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>

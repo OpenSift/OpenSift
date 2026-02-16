@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import os
+import secrets
+import time
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, AsyncGenerator, DefaultDict, Dict, List, Optional
 
 import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
+from starlette.status import HTTP_303_SEE_OTHER
 
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
@@ -26,17 +32,21 @@ from app.providers import (
 )
 from app.vectordb import VectorDB
 
-# Ensure UI can mount even if empty
+# -----------------------------------------------------------------------------
+# Setup
+# -----------------------------------------------------------------------------
 os.makedirs("static", exist_ok=True)
+os.makedirs("templates", exist_ok=True)
 
-app = FastAPI(title="OpenSift UI", version="0.4.1")
+AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
+
+app = FastAPI(title="OpenSift UI", version="0.5.1")
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 db = VectorDB()
 
-# In-memory chat history per owner namespace
 CHAT_HISTORY: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
 
 
@@ -48,29 +58,24 @@ def _ndjson(obj: Dict[str, Any]) -> bytes:
     return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-# -------------------------
-# Localhost-only security
-# -------------------------
-
-ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+# -----------------------------------------------------------------------------
+# Localhost-only middleware (defense-in-depth)
+# -----------------------------------------------------------------------------
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
 
 class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Client IP as seen by uvicorn/starlette
         client_host = request.client.host if request.client else ""
-        # Host header (may include port)
         host_header = request.headers.get("host", "")
         host_only = host_header.split(":")[0].strip().lower()
 
-        # Allow only loopback IPs AND localhost-ish Host headers.
-        # This prevents accidental exposure if someone runs with --host 0.0.0.0.
         is_loopback_ip = client_host in ("127.0.0.1", "::1")
         is_allowed_host = host_only in ALLOWED_HOSTS
 
         if not (is_loopback_ip and is_allowed_host):
             return PlainTextResponse(
-                "OpenSift UI is configured for localhost-only access.",
+                "OpenSift is configured for localhost-only access.",
                 status_code=403,
             )
 
@@ -79,21 +84,315 @@ class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(LocalhostOnlyMiddleware)
 
+# -----------------------------------------------------------------------------
+# Auth: generated token OR user password
+# -----------------------------------------------------------------------------
+# Token rotates each run (easy local bootstrap)
+GEN_TOKEN = secrets.token_urlsafe(24)
 
-# -------------------------
-# Chatbot UI (chat.html)
-# -------------------------
+# Cookie signing secret rotates each run (sessions invalidated on restart)
+SESSION_SIGNING_SECRET = secrets.token_bytes(32)
 
-@app.get("/", response_class=HTMLResponse)
-async def root_chat(request: Request, owner: str = "default"):
-    # Chat-first UI
+AUTH_COOKIE_NAME = "opensift_auth"
+AUTH_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
+
+
+def _sign(message: bytes) -> str:
+    sig = hmac.new(SESSION_SIGNING_SECRET, message, hashlib.sha256).digest()
+    return _b64url(sig)
+
+
+def _make_session_cookie() -> str:
+    payload = {"ts": int(time.time()), "exp": int(time.time()) + AUTH_TTL_SECONDS}
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = _b64url(raw)
+    sig = _sign(body.encode("utf-8"))
+    return f"{body}.{sig}"
+
+
+def _verify_session_cookie(value: str) -> bool:
+    try:
+        body, sig = value.split(".", 1)
+        expected = _sign(body.encode("utf-8"))
+        if not hmac.compare_digest(sig, expected):
+            return False
+        raw = _b64url_decode(body)
+        payload = json.loads(raw.decode("utf-8"))
+        exp = int(payload.get("exp", 0))
+        return int(time.time()) <= exp
+    except Exception:
+        return False
+
+
+def _load_auth_state() -> Dict[str, Any]:
+    if not os.path.exists(AUTH_STATE_PATH):
+        return {"has_password": False}
+    try:
+        with open(AUTH_STATE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"has_password": False}
+        return data
+    except Exception:
+        return {"has_password": False}
+
+
+def _save_auth_state(state: Dict[str, Any]) -> None:
+    with open(AUTH_STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+def _pbkdf2_hash_password(password: str, salt: bytes, iters: int) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iters)
+
+
+def _set_password(password: str) -> None:
+    salt = secrets.token_bytes(16)
+    iters = 200_000
+    pw_hash = _pbkdf2_hash_password(password, salt, iters)
+    state = {
+        "has_password": True,
+        "salt_b64": _b64url(salt),
+        "hash_b64": _b64url(pw_hash),
+        "algo": "pbkdf2_hmac_sha256",
+        "iters": iters,
+        "updated_at": _now(),
+    }
+    _save_auth_state(state)
+
+
+def _has_password() -> bool:
+    return bool(_load_auth_state().get("has_password"))
+
+
+def _verify_password(password: str) -> bool:
+    state = _load_auth_state()
+    if not state.get("has_password"):
+        return False
+    try:
+        salt = _b64url_decode(state["salt_b64"])
+        expected = _b64url_decode(state["hash_b64"])
+        iters = int(state.get("iters", 200_000))
+        actual = _pbkdf2_hash_password(password, salt, iters)
+        return hmac.compare_digest(expected, actual)
+    except Exception:
+        return False
+
+
+def _is_authenticated(request: Request) -> bool:
+    cookie = request.cookies.get(AUTH_COOKIE_NAME)
+    return bool(cookie and _verify_session_cookie(cookie))
+
+
+EXEMPT_PATHS = {
+    "/login",
+    "/set-password",
+    "/health",
+}
+EXEMPT_PREFIXES = ("/static",)
+
+
+def _is_api_path(path: str) -> bool:
+    # for fetch() calls; return JSON on auth failures
+    return path.startswith("/chat/")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        if path in EXEMPT_PATHS or any(path.startswith(p) for p in EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        if _is_authenticated(request):
+            return await call_next(request)
+
+        # Not authenticated
+        if _is_api_path(path):
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+
+        return RedirectResponse(url="/login", status_code=HTTP_303_SEE_OTHER)
+
+
+app.add_middleware(AuthMiddleware)
+
+
+@app.on_event("startup")
+async def _print_startup_token():
+    print("\n" + "=" * 72)
+    print("OpenSift Local Auth")
+    print(f"Generated login token (valid until restart): {GEN_TOKEN}")
+    print(f"Password set: {'YES' if _has_password() else 'NO'}")
+    print("=" * 72 + "\n")
+
+
+# -----------------------------------------------------------------------------
+# Auth pages
+# -----------------------------------------------------------------------------
+@app.get("/health")
+async def health():
+    return JSONResponse({"ok": True, "time": _now()})
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    # Localhost-only, so showing token here is acceptable and very useful
     return templates.TemplateResponse(
-        "chat.html",
+        "login.html",
         {
             "request": request,
-            "owner": owner,
-            "history": CHAT_HISTORY[owner],
+            "mode": "login",
+            "has_password": _has_password(),
+            "token": GEN_TOKEN,
+            "error": None,
         },
+    )
+
+
+@app.post("/login")
+async def login_submit(
+    request: Request,
+    password: str = Form(""),
+    token: str = Form(""),
+):
+    token = (token or "").strip()
+    password = (password or "").strip()
+
+    ok = False
+    if token and secrets.compare_digest(token, GEN_TOKEN):
+        ok = True
+    elif password and _verify_password(password):
+        ok = True
+
+    if not ok:
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "mode": "login",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Invalid token or password.",
+            },
+            status_code=401,
+        )
+
+    resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
+    resp.set_cookie(
+        AUTH_COOKIE_NAME,
+        _make_session_cookie(),
+        httponly=True,
+        samesite="lax",
+        secure=False,  # localhost http
+        max_age=AUTH_TTL_SECONDS,
+    )
+    return resp
+
+
+@app.get("/set-password", response_class=HTMLResponse)
+async def set_password_page(request: Request):
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "mode": "set_password",
+            "has_password": _has_password(),
+            "token": GEN_TOKEN,
+            "error": None,
+        },
+    )
+
+
+@app.post("/set-password")
+async def set_password_submit(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    token = (token or "").strip()
+    new_password = (new_password or "").strip()
+    confirm_password = (confirm_password or "").strip()
+
+    if not secrets.compare_digest(token, GEN_TOKEN):
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "mode": "set_password",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Invalid token. Copy/paste the generated token exactly.",
+            },
+            status_code=401,
+        )
+
+    if len(new_password) < 8:
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "mode": "set_password",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Password must be at least 8 characters.",
+            },
+            status_code=400,
+        )
+
+    if new_password != confirm_password:
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "mode": "set_password",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Passwords do not match.",
+            },
+            status_code=400,
+        )
+
+    _set_password(new_password)
+
+    # auto-login
+    resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
+    resp.set_cookie(
+        AUTH_COOKIE_NAME,
+        _make_session_cookie(),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=AUTH_TTL_SECONDS,
+    )
+    return resp
+
+
+@app.post("/logout")
+async def logout():
+    resp = RedirectResponse(url="/login", status_code=HTTP_303_SEE_OTHER)
+    resp.delete_cookie(AUTH_COOKIE_NAME)
+    return resp
+
+
+# -----------------------------------------------------------------------------
+# UI pages
+# -----------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request, owner: str = "default"):
+    # Chat is the default landing page (auth middleware will redirect to /login if needed)
+    return templates.TemplateResponse(
+        "chat.html",
+        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]},
     )
 
 
@@ -101,11 +400,7 @@ async def root_chat(request: Request, owner: str = "default"):
 async def chat_page(request: Request, owner: str = "default"):
     return templates.TemplateResponse(
         "chat.html",
-        {
-            "request": request,
-            "owner": owner,
-            "history": CHAT_HISTORY[owner],
-        },
+        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]},
     )
 
 
@@ -115,10 +410,9 @@ async def chat_clear(owner: str = Form("default")):
     return JSONResponse({"ok": True})
 
 
-# -------------------------
-# Chat-first ingestion endpoints
-# -------------------------
-
+# -----------------------------------------------------------------------------
+# Ingest endpoints (chat-first)
+# -----------------------------------------------------------------------------
 @app.post("/chat/ingest/url")
 async def chat_ingest_url(
     owner: str = Form("default"),
@@ -210,10 +504,9 @@ async def chat_ingest_file(
     return JSONResponse({"ok": True, "assistant": assistant_msg})
 
 
-# -------------------------
+# -----------------------------------------------------------------------------
 # Streaming chat endpoint (NDJSON)
-# -------------------------
-
+# -----------------------------------------------------------------------------
 @app.post("/chat/stream")
 async def chat_stream(
     owner: str = Form("default"),
@@ -223,29 +516,14 @@ async def chat_stream(
     model: str = Form(""),
     k: int = Form(8),
 ):
-    """
-    Streams assistant response as NDJSON lines.
-    Each line is a JSON object: {type: "...", ...}
-
-    Types emitted:
-      - start: {type, ts}
-      - status: {type, text}
-      - sources: {type, sources: [...]}
-      - delta: {type, text}      (incremental assistant text)
-      - done: {type, ts}
-      - error: {type, message}
-    """
-
     async def gen() -> AsyncGenerator[bytes, None]:
-        user_ts = _now()
-        user_msg = {"role": "user", "text": message, "ts": user_ts}
+        # Save user msg
+        user_msg = {"role": "user", "text": message, "ts": _now()}
         CHAT_HISTORY[owner].append(user_msg)
 
-        # Start
         yield _ndjson({"type": "start", "ts": _now()})
         yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
 
-        # Retrieve passages for grounding
         try:
             q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([message])[0])
             res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k)))
@@ -264,8 +542,9 @@ async def chat_stream(
         for i in range(len(docs)):
             if owner and metas[i].get("owner") != owner:
                 continue
-            item = {"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])}
-            results.append(item)
+            results.append(
+                {"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])}
+            )
             passages.append({"text": docs[i], "meta": metas[i]})
 
         if not results:
@@ -321,7 +600,6 @@ async def chat_stream(
                 "If you set a provider (OpenAI/Claude/Claude Code), I can turn this into a study guide/quiz."
             )
 
-        # Pseudo-streaming (chunked)
         chunk_size = 60
         for i in range(0, len(assistant_text), chunk_size):
             yield _ndjson({"type": "delta", "text": assistant_text[i : i + chunk_size]})

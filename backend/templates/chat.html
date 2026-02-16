@@ -53,6 +53,7 @@
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="ghost" id="toggleIngestBtn" type="button">Ingest</button>
+          <button class="ghost" id="logoutBtn" type="button">Logout</button>
           <button class="danger" id="clearBtn" type="button">Clear chat</button>
         </div>
       </div>
@@ -63,26 +64,11 @@
             <div class="bubble">
               {{ m.text }}
               <div class="meta">{{ m.ts }}</div>
-
-              {% if m.role == "assistant" and m.sources %}
-                <div class="sources">
-                  <div class="hint">Sources:</div>
-                  {% for s in m.sources %}
-                    <div class="source">
-                      <strong>{{ s.source }}</strong>
-                      {% if s.url %} · <a href="{{ s.url }}" target="_blank">link</a>{% endif %}
-                      · d={{ "%.4f"|format(s.distance) }}
-                      <div class="hint">{{ s.preview }}…</div>
-                    </div>
-                  {% endfor %}
-                </div>
-              {% endif %}
             </div>
           </div>
         {% endfor %}
       </div>
 
-      <!-- Ingest panel -->
       <div class="panel" id="ingestPanel" style="display:none;">
         <h2>Ingest (into this owner)</h2>
 
@@ -141,6 +127,7 @@
       const kEl = document.getElementById("k");
       const sendBtn = document.getElementById("sendBtn");
       const clearBtn = document.getElementById("clearBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
 
       const ingestPanel = document.getElementById("ingestPanel");
       const toggleIngestBtn = document.getElementById("toggleIngestBtn");
@@ -155,7 +142,7 @@
       function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
       function setBusy(on) { busy.classList.toggle("on", !!on); }
 
-      function addBubble(role, text, ts, sources) {
+      function addBubble(role, text, ts) {
         const msg = document.createElement("div");
         msg.className = "msg " + role;
 
@@ -172,47 +159,11 @@
         meta.textContent = ts || "";
         bubble.appendChild(meta);
 
-        if (role === "assistant" && sources && sources.length) {
-          const sourcesDiv = renderSources(sources);
-          bubble.appendChild(sourcesDiv);
-        }
-
         msg.appendChild(bubble);
         chat.appendChild(msg);
         scrollToBottom();
 
-        return { msgEl: msg, bubbleEl: bubble, textEl: textNode };
-      }
-
-      function renderSources(sources) {
-        const sourcesDiv = document.createElement("div");
-        sourcesDiv.className = "sources";
-
-        const hint = document.createElement("div");
-        hint.className = "hint";
-        hint.textContent = "Sources:";
-        sourcesDiv.appendChild(hint);
-
-        sources.forEach(s => {
-          const item = document.createElement("div");
-          item.className = "source";
-
-          const title = document.createElement("div");
-          title.innerHTML =
-            `<strong>${s.source || "source"}</strong>` +
-            (s.url ? ` · <a href="${s.url}" target="_blank">link</a>` : "") +
-            (typeof s.distance === "number" ? ` · d=${s.distance.toFixed(4)}` : "");
-          item.appendChild(title);
-
-          const prev = document.createElement("div");
-          prev.className = "hint";
-          prev.textContent = (s.preview || "") + "…";
-          item.appendChild(prev);
-
-          sourcesDiv.appendChild(item);
-        });
-
-        return sourcesDiv;
+        return { textEl: textNode };
       }
 
       function owner() {
@@ -221,18 +172,25 @@
         return o;
       }
 
+      async function ensureAuth(res) {
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = "/login";
+          return false;
+        }
+        return true;
+      }
+
       async function sendStream() {
         const o = owner();
         const message = msgEl.value.trim();
         if (!message) return;
 
-        addBubble("user", message, new Date().toISOString(), null);
+        addBubble("user", message, new Date().toISOString());
         msgEl.value = "";
         sendBtn.disabled = true;
         setBusy(true);
 
-        // Create assistant bubble immediately (stream into it)
-        const a = addBubble("assistant", "", new Date().toISOString(), null);
+        const a = addBubble("assistant", "", new Date().toISOString());
 
         const form = new FormData();
         form.append("owner", o);
@@ -242,6 +200,8 @@
         form.append("k", kEl.value);
 
         const res = await fetch("/chat/stream", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+
         if (!res.ok || !res.body) {
           a.textEl.textContent = "Streaming failed to start.";
           setBusy(false);
@@ -252,12 +212,6 @@
         const reader = res.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
-        let sourcesDiv = null;
-
-        function setAssistantTextAppend(delta) {
-          a.textEl.textContent += delta;
-          scrollToBottom();
-        }
 
         while (true) {
           const { value, done } = await reader.read();
@@ -268,40 +222,14 @@
           while ((idx = buffer.indexOf("\n")) >= 0) {
             const line = buffer.slice(0, idx).trim();
             buffer = buffer.slice(idx + 1);
-
             if (!line) continue;
 
             let evt;
             try { evt = JSON.parse(line); } catch { continue; }
 
-            if (evt.type === "status") {
-              // You can optionally show status messages somewhere; for now we append subtle text
-              // (comment out if you don't want it)
-              // setAssistantTextAppend(`\n\n[${evt.text}]\n`);
-              continue;
-            }
-
-            if (evt.type === "sources" && evt.sources) {
-              // Render sources section once
-              sourcesDiv = renderSources(evt.sources);
-              a.bubbleEl.appendChild(sourcesDiv);
-              scrollToBottom();
-              continue;
-            }
-
             if (evt.type === "delta") {
-              setAssistantTextAppend(evt.text || "");
-              continue;
-            }
-
-            if (evt.type === "error") {
-              setAssistantTextAppend(`\n\nError: ${evt.message || "unknown error"}`);
-              continue;
-            }
-
-            if (evt.type === "done") {
-              // done
-              continue;
+              a.textEl.textContent += (evt.text || "");
+              scrollToBottom();
             }
           }
         }
@@ -315,7 +243,7 @@
         const url = ingestUrlEl.value.trim();
         if (!url) return;
 
-        addBubble("user", `Ingest URL: ${url}`, new Date().toISOString(), null);
+        addBubble("user", `Ingest URL: ${url}`, new Date().toISOString());
         ingestUrlBtn.disabled = true;
         setBusy(true);
 
@@ -325,13 +253,10 @@
         form.append("source_title", ingestTitleEl.value.trim());
 
         const res = await fetch("/chat/ingest/url", { method: "POST", body: form });
-        const data = await res.json();
+        if (!(await ensureAuth(res))) return;
 
-        if (data.assistant) {
-          addBubble("assistant", data.assistant.text, data.assistant.ts, data.assistant.sources || []);
-        } else {
-          addBubble("assistant", "URL ingest failed.", new Date().toISOString(), []);
-        }
+        const data = await res.json();
+        addBubble("assistant", (data.assistant && data.assistant.text) ? data.assistant.text : "URL ingest failed.", new Date().toISOString());
 
         ingestUrlEl.value = "";
         ingestTitleEl.value = "";
@@ -345,7 +270,7 @@
         const file = ingestFileEl.files && ingestFileEl.files[0];
         if (!file) return;
 
-        addBubble("user", `Upload & ingest: ${file.name}`, new Date().toISOString(), null);
+        addBubble("user", `Upload & ingest: ${file.name}`, new Date().toISOString());
         ingestFileBtn.disabled = true;
         setBusy(true);
 
@@ -354,13 +279,10 @@
         form.append("file", file);
 
         const res = await fetch("/chat/ingest/file", { method: "POST", body: form });
-        const data = await res.json();
+        if (!(await ensureAuth(res))) return;
 
-        if (data.assistant) {
-          addBubble("assistant", data.assistant.text, data.assistant.ts, data.assistant.sources || []);
-        } else {
-          addBubble("assistant", "File ingest failed.", new Date().toISOString(), []);
-        }
+        const data = await res.json();
+        addBubble("assistant", (data.assistant && data.assistant.text) ? data.assistant.text : "File ingest failed.", new Date().toISOString());
 
         ingestFileEl.value = "";
 
@@ -371,8 +293,14 @@
       async function clearChat() {
         const form = new FormData();
         form.append("owner", owner());
-        await fetch("/chat/clear", { method: "POST", body: form });
+        const res = await fetch("/chat/clear", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
         chat.innerHTML = "";
+      }
+
+      async function logout() {
+        await fetch("/logout", { method: "POST" });
+        window.location.href = "/login";
       }
 
       toggleIngestBtn.addEventListener("click", () => {
@@ -381,6 +309,7 @@
 
       sendBtn.addEventListener("click", sendStream);
       clearBtn.addEventListener("click", clearChat);
+      logoutBtn.addEventListener("click", logout);
 
       ingestUrlBtn.addEventListener("click", ingestUrl);
       ingestFileBtn.addEventListener("click", ingestFile);
