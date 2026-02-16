@@ -1,249 +1,195 @@
-**OpenSift** is an AI-assisted study and research tool that helps students (and researchers) **sift through large amounts of information**—notes, PDFs, websites, and articles—to quickly surface what matters most.
+# OpenSift
 
-It focuses on **ingestion, semantic retrieval, and synthesis**, making it easier to study for exams, quizzes, and deep reading tasks without getting lost in the noise.
+> Sift faster. Study smarter.
 
----
-
-## ✨ What OpenSift Does
-
-- 📥 **Ingest content**
-  - Websites (URLs)
-  - PDFs
-  - Text / Markdown files
-- 🧠 **Chunk + embed** content into a searchable knowledge base
-- 🔍 **Semantic search** across all ingested materials
-- 📝 **AI-assisted synthesis** (study guides, summaries, quizzes)
-- 🔐 **Flexible AI providers**
-  - Local embeddings (no API keys required)
-  - OpenAI (API key)
-  - Claude (API key)
-  - Claude Code (long-lived setup-token / subscription)
-
-OpenSift is designed to work well with **Codex / MCP workflows**, so the AI agent can retrieve context and generate answers without direct API coupling.
+OpenSift is an AI-powered study assistant that helps students ingest large amounts of information (URLs, PDFs, lecture notes) and intelligently sift through it using semantic search and AI generation.
 
 ---
 
-## 🧱 Architecture Overview
+# 🎯 Why OpenSift?
 
-- **MCP Server (stdio-based)**
-  - Exposes tools like `ingest_url`, `ingest_file`, `search`, `sift_generate`
-- **Vector Store**
-  - ChromaDB (local, persistent)
-- **Embeddings**
-  - Default: local `sentence-transformers`
-  - Optional: OpenAI embeddings if API key is set
-- **Generation**
-  - OpenAI
-  - Claude (Anthropic)
-  - Claude Code CLI (setup-token)
+Students don’t struggle because they lack information.  
+They struggle because they have too much of it.
+
+OpenSift helps by:
+- Ingesting textbooks, PDFs, and web articles
+- Finding only the most relevant sections
+- Grounding AI responses in your materials
+- Streaming answers in real-time
+- Generating structured study guides and quizzes
 
 ---
 
-## 📁 Project Structure
+# 🎬 Demo
 
-```text
-backend/
-├── app/
-│   ├── chunking.py        # Text chunking logic
-│   ├── ingest.py          # URL + file ingestion
-│   ├── llm.py             # Embeddings (local + OpenAI fallback)
-│   ├── providers.py       # OpenAI / Claude / Claude Code generation
-│   ├── settings.py        # Environment-based configuration
-│   └── vectordb.py        # ChromaDB wrapper
-├── mcp_server.py          # MCP server entrypoint
-├── ui_app.py              # Web UI (FastAPI)
-├── test_mcp_client.py     # MCP ingestion + search test client
-├── templates/
-│   └── index.html         # UI template
-├── static/                # UI assets (icons/css)
-├── requirements.txt
-└── .env                   # Optional secrets (ignored by git)
-```
+![OpenSift Demo](docs/assets/screenshot.png)
+
 ---
 
-## ⚡ Quick Start (5 Minutes)
+# 🖼 Screenshots
 
-This gets OpenSift running locally with **no API keys required**.
+![Study Guide](docs/assets/study_guide.png)
+![Key Points](docs/assets/key_points.png)
+![Quiz Me](docs/assets/quiz_me.png)
 
-### 1) Clone the repository and enter the backend
+---
+
+# 🚀 Quick Start
+
+## 1. Create a virtual environment
+
 ```
 bash
-git clone https://github.com/your-org/opensift.git
-cd opensift/backend
-```
-### 2) Create and activate a virtual environment
-```
 python3.13 -m venv .venv
 source .venv/bin/activate
 ```
-### 3) Install dependencies
+(Recommended: Python 3.12 or 3.13)
+
+## 2. Install dependencies
+
 ```
 pip install -U pip setuptools wheel
 pip install -r requirements.txt
-pip install sentence-transformers
 ```
 
-### 4) Run the Web UI
+## 3. Set API Keys (Optional)
+
+Supported providers:
+	•	Claude Code (setup-token)
+	•	Claude API (Anthropic)
+	•	OpenAI API
+
+
+Example:
+
+export OPENAI_API_KEY="your-key"
+
+export ANTHROPIC_API_KEY="your-key"
+
+Claude Code users:
+
+```
+claude setup-token
+export CLAUDE_CODE_OAUTH_TOKEN="..."
+unset ANTHROPIC_API_KEY
+```
+
+If no provider is configured, OpenSift will still retrieve relevant passages but won’t generate AI summaries.
+
+## 4. Run the app
 
 ```
 uvicorn ui_app:app --reload --port 8001
 ```
-Open your browser at:
+
+
+Open:
 ```
-http://127.0.0.1:8001
+http://127.0.0.1:8001/
 ```
 
-🎉 You now have a full UI where you can ingest content and search it interactively.
+The chatbot page is the default UI.
 
-🖥️ Using the OpenSift Web UI
+💬 Chat-First Workflow
 
-Ingest content
+Everything happens inside the chatbot interface.
 
-From the UI you can:
-	•	Paste a URL (articles, documentation, Wikipedia, etc.)
-	•	Upload PDF, TXT, or Markdown files
-	•	Assign an Owner / Namespace (e.g. biology101, cs_midterm)
+You can:
 
-Namespaces let you isolate different courses or projects.
+📥 Ingest
+	•	Paste a URL and ingest it
+	•	Upload a PDF, TXT, or MD file
+	•	Keep materials separated using the owner field
+
+🔎 Ask Questions
+	•	Ask conceptual questions
+	•	Request study guides
+	•	Generate quizzes
+	•	Compare topics
+	•	Extract key points
+
+⚡ Streaming Responses
+
+Responses stream live as they are generated.
+
+You’ll see:
+	•	Retrieval phase
+	•	Source citations
+	•	Incremental streaming output
 
 ⸻
 
-Search your material
-	•	Enter a natural-language question
-	•	OpenSift retrieves the most relevant passages
-	•	Results are grounded in your ingested sources
-
-Example queries:
-	•	“What are the stages of photosynthesis?”
-	•	“Compare cellular respiration and photosynthesis”
-	•	“Summarize the Calvin cycle inputs and outputs”
+🧠 How OpenSift Works
+	1.	Text is chunked into semantic segments
+	2.	Each chunk is embedded into vector space
+	3.	Stored in ChromaDB
+	4.	Queries retrieve relevant chunks
+	5.	AI generates answers grounded in those chunks
+	6.	Responses stream back to the UI
 
 ⸻
 
-Generate study content (optional)
+🗂 Owners (Namespaces)
 
-If you configure an AI provider, OpenSift can:
-	•	Generate study guides
-	•	Produce key point summaries
-	•	Create quizzes
+Use the owner field in the chat UI to separate subjects.
 
-Generation always uses retrieved passages from your material.
+Examples:
+	•	bio101
+	•	chem_midterm
+	•	cs_final
+	•	history_notes
 
-⸻
-
-🧠 Architecture Overview
-	•	Web UI
-	•	FastAPI + Jinja2
-	•	MCP Server (stdio-based)
-	•	Tools: ingest_url, ingest_file, search, sift_generate
-	•	Vector Store
-	•	ChromaDB (local, persistent)
-	•	Embeddings
-	•	Default: local sentence-transformers
-	•	Optional: OpenAI embeddings
-	•	Generation
-	•	OpenAI
-	•	Claude
-	•	Claude Code CLI
-
-
-
-### 4a) Feed OpenSift information
-Open test_mcp_client.py and add:
-	•	URLs you want to study
-	•	PDFs / TXT / MD files (lecture notes, articles, books)
-
-Example URLs already included:
-```
-urls = [
-    ("Photosynthesis (Wiki)", "https://en.wikipedia.org/wiki/Photosynthesis"),
-    ("Cellular respiration (Wiki)", "https://en.wikipedia.org/wiki/Cellular_respiration"),
-]
-```
-### 5) Run the test client
-```
-python test_mcp_client.py
-```
-You should see:
-	•	MCP tools listed
-	•	content ingested
-	•	successful semantic searches
-
-🎉 You are now searching your own study material.
+Each owner has:
+	•	Separate vector results
+	•	Separate chat history
 
 ⸻
 
-### 6) Try your own searches
+🛠 Supported Providers
 
-The test client runs example queries like:
-	•	“What are the stages of photosynthesis?”
-	•	“Compare photosynthesis vs cellular respiration”
+Provider | Requires Key | Streaming | Notes
 
-Add your own:
+Claude Code | Setup token | Yes* | Recommended
+
+Claude API | API key | Yes | Anthropic
+
+OpenAI | API key | Yes | GPT-4.1-mini default
+
+* Claude Code currently uses chunk-streaming unless native token streaming is enabled.
+
+📂 Project Structure
+```text
+backend/
+├── app/
+│   ├── chunking.py
+│   ├── ingest.py
+│   ├── llm.py
+│   ├── providers.py
+│   ├── settings.py
+│   └── vectordb.py
+├── templates/
+│   └── chat.html
+├── static/
+├── ui_app.py
+└── requirements.txt
 ```
-search_queries = [
-    "Explain the Calvin cycle step by step",
-    "Which reactions produce ATP?",
-]
+
+🔐 Environment Variables
+
+Optional but recommended:
 ```
-### 🔍 Available MCP Tools
-
-Tool | Description
-ingest_url | Fetch and ingest a webpage
-ingest_file | Ingest PDF / TXT / MD files
-search | Semantic search over ingested content
-sift_generate | Retrieve + generate study content
-
-🔐 AI Provider Configuration (Optional)
-
-OpenSift works without any API keys by default.
-
-OpenAI
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
 ```
-export OPENAI_API_KEY="sk-..."
-```
-Claude (Anthropic API)
-```
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-Claude Code (subscription / setup-token)
-claude setup-token
-export CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-..."
-unset ANTHROPIC_API_KEY
 
-Then call:
-```
-{
-  "provider": "claude_code"
-}
-```
-🚀 Why OpenSift?
-
-Most study tools either:
-	•	summarize without grounding, or
-	•	require constant manual searching
-
-OpenSift flips that model:
-	•	You ingest everything once
-	•	You retrieve exactly what matters
-	•	AI works with your sources, not instead of them
-
-It’s built for:
-	•	exam preparation
-	•	research synthesis
-	•	large reading loads
-	•	agent-based study workflows
-
-⸻
-
-🛣️ Roadmap (High-Level)
-	•	✅ Local ingestion + semantic search
-	•	✅ No-key local embeddings
-	•	✅ MCP-based agent integration
-	•	🔜 CLI ingestion (opensift ingest)
-	•	🔜 Per-course / per-project collections
-	•	🔜 Exam mode (quizzes + flashcards)
-	•	🔜 Lightweight web UI
+🧭 Roadmap
+	•	True token streaming from providers
+	•	Chat memory persistence (SQLite)
+	•	User authentication
+	•	Multi-user support
+	•	OCR support for scanned PDFs
+	•	Docker deployment
+	•	UI theming
 
 ⸻
 
@@ -253,8 +199,9 @@ MIT
 
 ⸻
 
-🙌 Acknowledgements
-	•	ChromaDB
-	•	sentence-transformers
-	•	MCP (Model Context Protocol)
-	•	OpenAI & Anthropic ecosystems
+💡 Philosophy
+
+OpenSift helps students focus on understanding — not searching.
+
+It retrieves relevant material and organizes it intelligently so learners can study faster and retain more.
+
