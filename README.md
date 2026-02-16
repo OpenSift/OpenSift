@@ -80,6 +80,38 @@ If no provider is configured, OpenSift will still retrieve relevant passages but
 
 ## 4. Run the app
 
+### 4.a How to run it
+
+### TEST FEATURE
+
+From backend/:
+
+✅ Web UI (localhost)
+
+```
+python opensift.py ui --reload
+```
+
+✅ Terminal chatbot
+
+```
+python opensift.py terminal
+```
+
+Example: separate class namespace + quiz mode:
+
+```
+python opensift.py terminal --owner bio101 --mode quiz
+```
+Then inside the terminal chat:
+	•	Ingest a URL:
+/ingest url https://en.wikipedia.org/wiki/Photosynthesis
+	•	Ingest a file:
+/ingest file /path/to/chapter1.pdf
+	•	Ask questions normally.
+
+### 4.b Old Method:
+
 ```
 uvicorn ui_app:app --reload --host 127.0.0.1 --port 8001
 ```
