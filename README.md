@@ -1,5 +1,7 @@
 # OpenSift
 
+## Please note that this is only a hobby project, may be insecure, contain security holes, and only a proof-of-conecpt.
+
 > Sift faster. Study smarter.
 
 OpenSift is an AI-powered study assistant that helps students ingest large amounts of information (URLs, PDFs, lecture notes) and intelligently sift through it using semantic search and AI generation.
