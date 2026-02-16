@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpenSift Chat</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #0b1020; color: #e9eefc; }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+      .header { display:flex; align-items:center; justify-content:space-between; gap: 10px; }
+      .brand { display:flex; align-items:center; gap:10px; }
+      .brand h1 { font-size: 18px; margin: 0; }
+      .pill { font-size: 12px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: rgba(233,238,252,.9); }
+      .chat { margin-top: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 14px; height: 62vh; overflow:auto; }
+      .msg { display:flex; margin: 10px 0; }
+      .msg.user { justify-content:flex-end; }
+      .bubble { max-width: 78%; padding: 10px 12px; border-radius: 14px; line-height: 1.35; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+      .user .bubble { background: #2a3fff; color: #fff; border-top-right-radius: 6px; }
+      .assistant .bubble { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.10); border-top-left-radius: 6px; }
+      .meta { font-size: 11px; opacity: .7; margin-top: 6px; }
+      .composer { margin-top: 12px; display:grid; gap: 10px; }
+      .controls { display:grid; grid-template-columns: 1.2fr 1fr 1fr 0.7fr; gap: 10px; }
+      input, select, textarea { width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.06); color: #e9eefc; }
+      textarea { min-height: 56px; resize: vertical; }
+      .actions { display:flex; gap:10px; justify-content:space-between; align-items:center; }
+      button { padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.10); color: #e9eefc; cursor:pointer; }
+      button.primary { background: #2a3fff; border-color: #2a3fff; color:#fff; }
+      button.danger { background: rgba(255,70,70,.18); border-color: rgba(255,70,70,.35); }
+      .sources { margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,.18); }
+      .source { font-size: 12px; opacity: .9; margin: 8px 0; }
+      .source a { color: #9fb0ff; text-decoration:none; }
+      .hint { font-size: 12px; opacity: .75; }
+      @media (max-width: 900px){
+        .controls { grid-template-columns: 1fr 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">
+        <div class="brand">
+          <h1>OpenSift</h1>
+          <span class="pill">Chat</span>
+          <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <a class="pill" href="/">Ingest</a>
+          <button class="danger" id="clearBtn" type="button">Clear chat</button>
+        </div>
+      </div>
+
+      <div class="chat" id="chat">
+        {% for m in history %}
+          <div class="msg {{ m.role }}">
+            <div class="bubble">
+              {{ m.text }}
+              <div class="meta">{{ m.ts }}</div>
+
+              {% if m.role == "assistant" and m.sources %}
+                <div class="sources">
+                  <div class="hint">Sources:</div>
+                  {% for s in m.sources %}
+                    <div class="source">
+                      <strong>{{ s.source }}</strong>
+                      {% if s.url %} · <a href="{{ s.url }}" target="_blank">link</a>{% endif %}
+                      · d={{ "%.4f"|format(s.distance) }}
+                      <div class="hint">{{ s.preview }}…</div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="composer">
+        <div class="controls">
+          <input id="owner" value="{{ owner }}" placeholder="owner (namespace)" />
+          <select id="mode">
+            <option value="study_guide">Study Guide</option>
+            <option value="key_points">Key Points</option>
+            <option value="quiz">Quiz</option>
+          </select>
+          <select id="provider">
+            <option value="claude_code">Claude Code (setup-token)</option>
+            <option value="claude">Claude (API key)</option>
+            <option value="openai">OpenAI (API key)</option>
+          </select>
+          <input id="k" type="number" value="8" min="1" max="20" />
+        </div>
+
+        <textarea id="msg" placeholder="Ask OpenSift… (Shift+Enter for newline)"></textarea>
+
+        <div class="actions">
+          <div class="hint">Tip: use owners like <code>bio101</code> or <code>cs_midterm</code> to keep chats separate.</div>
+          <button class="primary" id="sendBtn" type="button">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const chat = document.getElementById("chat");
+      const ownerEl = document.getElementById("owner");
+      const ownerLabel = document.getElementById("ownerLabel");
+      const msgEl = document.getElementById("msg");
+      const modeEl = document.getElementById("mode");
+      const providerEl = document.getElementById("provider");
+      const kEl = document.getElementById("k");
+      const sendBtn = document.getElementById("sendBtn");
+      const clearBtn = document.getElementById("clearBtn");
+
+      function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
+
+      function addBubble(role, text, ts, sources) {
+        const msg = document.createElement("div");
+        msg.className = "msg " + role;
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.textContent = text;
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = ts || "";
+        bubble.appendChild(meta);
+
+        if (role === "assistant" && sources && sources.length) {
+          const sourcesDiv = document.createElement("div");
+          sourcesDiv.className = "sources";
+
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "Sources:";
+          sourcesDiv.appendChild(hint);
+
+          sources.forEach(s => {
+            const item = document.createElement("div");
+            item.className = "source";
+
+            const title = document.createElement("div");
+            title.innerHTML = `<strong>${s.source || "source"}</strong>` +
+              (s.url ? ` · <a href="${s.url}" target="_blank">link</a>` : "") +
+              (typeof s.distance === "number" ? ` · d=${s.distance.toFixed(4)}` : "");
+            item.appendChild(title);
+
+            const prev = document.createElement("div");
+            prev.className = "hint";
+            prev.textContent = (s.preview || "") + "…";
+            item.appendChild(prev);
+
+            sourcesDiv.appendChild(item);
+          });
+
+          bubble.appendChild(sourcesDiv);
+        }
+
+        msg.appendChild(bubble);
+        chat.appendChild(msg);
+        scrollToBottom();
+      }
+
+      async function send() {
+        const owner = ownerEl.value.trim() || "default";
+        const message = msgEl.value.trim();
+        if (!message) return;
+
+        ownerLabel.textContent = owner;
+
+        // Optimistic UI
+        addBubble("user", message, new Date().toISOString(), null);
+        msgEl.value = "";
+        sendBtn.disabled = true;
+
+        const form = new FormData();
+        form.append("owner", owner);
+        form.append("message", message);
+        form.append("mode", modeEl.value);
+        form.append("provider", providerEl.value);
+        form.append("k", kEl.value);
+
+        const res = await fetch("/chat/message", { method: "POST", body: form });
+        const data = await res.json();
+
+        if (data.ok && data.assistant) {
+          addBubble("assistant", data.assistant.text, data.assistant.ts, data.assistant.sources);
+        } else {
+          addBubble("assistant", "Something went wrong sending that message.", new Date().toISOString(), null);
+        }
+
+        sendBtn.disabled = false;
+      }
+
+      async function clearChat() {
+        const form = new FormData();
+        form.append("owner", ownerEl.value.trim() || "default");
+        await fetch("/chat/clear", { method: "POST", body: form });
+        chat.innerHTML = "";
+      }
+
+      sendBtn.addEventListener("click", send);
+      clearBtn.addEventListener("click", clearChat);
+
+      msgEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          send();
+        }
+      });
+
+      scrollToBottom();
+    </script>
+  </body>
+</html>
