@@ -51,7 +51,11 @@ backend/
 │   ├── settings.py        # Environment-based configuration
 │   └── vectordb.py        # ChromaDB wrapper
 ├── mcp_server.py          # MCP server entrypoint
-├── test_mcp_client.py     # Local MCP test + ingestion script
+├── ui_app.py              # Web UI (FastAPI)
+├── test_mcp_client.py     # MCP ingestion + search test client
+├── templates/
+│   └── index.html         # UI template
+├── static/                # UI assets (icons/css)
 ├── requirements.txt
 └── .env                   # Optional secrets (ignored by git)
 ```
@@ -78,7 +82,73 @@ pip install -U pip setuptools wheel
 pip install -r requirements.txt
 pip install sentence-transformers
 ```
-### 4) Feed OpenSift information
+
+### 4) Run the Web UI
+
+```
+uvicorn ui_app:app --reload --port 8001
+```
+Open your browser at:
+```
+http://127.0.0.1:8001
+```
+
+🎉 You now have a full UI where you can ingest content and search it interactively.
+
+🖥️ Using the OpenSift Web UI
+
+Ingest content
+
+From the UI you can:
+	•	Paste a URL (articles, documentation, Wikipedia, etc.)
+	•	Upload PDF, TXT, or Markdown files
+	•	Assign an Owner / Namespace (e.g. biology101, cs_midterm)
+
+Namespaces let you isolate different courses or projects.
+
+⸻
+
+Search your material
+	•	Enter a natural-language question
+	•	OpenSift retrieves the most relevant passages
+	•	Results are grounded in your ingested sources
+
+Example queries:
+	•	“What are the stages of photosynthesis?”
+	•	“Compare cellular respiration and photosynthesis”
+	•	“Summarize the Calvin cycle inputs and outputs”
+
+⸻
+
+Generate study content (optional)
+
+If you configure an AI provider, OpenSift can:
+	•	Generate study guides
+	•	Produce key point summaries
+	•	Create quizzes
+
+Generation always uses retrieved passages from your material.
+
+⸻
+
+🧠 Architecture Overview
+	•	Web UI
+	•	FastAPI + Jinja2
+	•	MCP Server (stdio-based)
+	•	Tools: ingest_url, ingest_file, search, sift_generate
+	•	Vector Store
+	•	ChromaDB (local, persistent)
+	•	Embeddings
+	•	Default: local sentence-transformers
+	•	Optional: OpenAI embeddings
+	•	Generation
+	•	OpenAI
+	•	Claude
+	•	Claude Code CLI
+
+
+
+### 4a) Feed OpenSift information
 Open test_mcp_client.py and add:
 	•	URLs you want to study
 	•	PDFs / TXT / MD files (lecture notes, articles, books)
