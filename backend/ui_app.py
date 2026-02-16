@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, DefaultDict, Dict, List, Optional
+from typing import Any, AsyncGenerator, DefaultDict, Dict, List, Optional
 
+import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.status import HTTP_303_SEE_OTHER
+from starlette.responses import StreamingResponse
 
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
@@ -25,7 +28,7 @@ from app.vectordb import VectorDB
 # Ensure UI can mount even if empty
 os.makedirs("static", exist_ok=True)
 
-app = FastAPI(title="OpenSift UI", version="0.2.0")
+app = FastAPI(title="OpenSift UI", version="0.4.0")
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -40,28 +43,54 @@ def _now() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
+def _ndjson(obj: Dict[str, Any]) -> bytes:
+    return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+# -------------------------
+# Chatbot UI (chat.html)
+# -------------------------
+
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    """
-    Simple landing page for ingestion + search (classic UI).
-    If you prefer, you can redirect directly to chat.
-    """
+async def root_redirect_to_chat(request: Request, owner: str = "default"):
+    # Chat-first UI
     return templates.TemplateResponse(
-        "index.html",
+        "chat.html",
         {
             "request": request,
-            "message": request.query_params.get("msg"),
-            "search_results": None,
-            "generated": None,
+            "owner": owner,
+            "history": CHAT_HISTORY[owner],
         },
     )
 
 
-@app.post("/ingest/url")
-async def ingest_url(
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page(request: Request, owner: str = "default"):
+    return templates.TemplateResponse(
+        "chat.html",
+        {
+            "request": request,
+            "owner": owner,
+            "history": CHAT_HISTORY[owner],
+        },
+    )
+
+
+@app.post("/chat/clear")
+async def chat_clear(owner: str = Form("default")):
+    CHAT_HISTORY[owner].clear()
+    return JSONResponse({"ok": True})
+
+
+# -------------------------
+# Chat-first ingestion endpoints
+# -------------------------
+
+@app.post("/chat/ingest/url")
+async def chat_ingest_url(
+    owner: str = Form("default"),
     url: str = Form(...),
     source_title: str = Form(""),
-    owner: str = Form("default"),
 ):
     title, text = await fetch_url_text(url)
     source = source_title.strip() or title
@@ -78,16 +107,21 @@ async def ingest_url(
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
 
-    return RedirectResponse(
-        url=f"/?msg=Ingested+{len(chunks)}+chunks+from+URL",
-        status_code=HTTP_303_SEE_OTHER,
-    )
+    assistant_msg = {
+        "role": "assistant",
+        "ts": _now(),
+        "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{url}",
+        "sources": [],
+    }
+    CHAT_HISTORY[owner].append(assistant_msg)
+
+    return JSONResponse({"ok": True, "assistant": assistant_msg})
 
 
-@app.post("/ingest/file")
-async def ingest_file(
-    file: UploadFile = File(...),
+@app.post("/chat/ingest/file")
+async def chat_ingest_file(
     owner: str = Form("default"),
+    file: UploadFile = File(...),
 ):
     data = await file.read()
     filename = file.filename or "upload"
@@ -100,16 +134,24 @@ async def ingest_file(
         kind = "text"
         text = extract_text_from_txt(data)
     else:
-        return RedirectResponse(
-            url="/?msg=Unsupported+file+type+(pdf,txt,md)",
-            status_code=HTTP_303_SEE_OTHER,
-        )
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": "⚠️ Unsupported file type. Please upload: .pdf, .txt, or .md",
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     if not text.strip():
-        return RedirectResponse(
-            url="/?msg=No+text+extracted+from+file",
-            status_code=HTTP_303_SEE_OTHER,
-        )
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": f"⚠️ No text extracted from `{filename}`. (If it’s scanned, OCR isn’t enabled yet.)",
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     prefix = f"{owner}::{filename}" if owner else filename
     chunks = chunk_text(text, prefix=prefix)
@@ -124,123 +166,23 @@ async def ingest_file(
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
 
-    return RedirectResponse(
-        url=f"/?msg=Ingested+{len(chunks)}+chunks+from+file",
-        status_code=HTTP_303_SEE_OTHER,
-    )
+    assistant_msg = {
+        "role": "assistant",
+        "ts": _now(),
+        "text": f"✅ Ingested {len(chunks)} chunks from file:\n{filename}",
+        "sources": [],
+    }
+    CHAT_HISTORY[owner].append(assistant_msg)
 
-
-@app.get("/search", response_class=HTMLResponse)
-async def search(
-    request: Request,
-    q: str = "",
-    k: int = 5,
-    owner: str = "default",
-):
-    """
-    Classic search endpoint for index.html.
-    """
-    message = request.query_params.get("msg")
-    search_results = None
-
-    if q.strip():
-        q_emb = embed_texts([q])[0]
-        res = db.query(q_emb, k=k)
-
-        docs = res.get("documents", [[]])[0]
-        metas = res.get("metadatas", [[]])[0]
-        dists = res.get("distances", [[]])[0]
-        ids = res.get("ids", [[]])[0]
-
-        items: List[Dict[str, Any]] = []
-        for i in range(len(docs)):
-            if owner and metas[i].get("owner") != owner:
-                continue
-            items.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
-
-        search_results = items
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "message": message,
-            "search_results": search_results,
-            "generated": None,
-        },
-    )
-
-
-@app.post("/generate", response_class=HTMLResponse)
-async def generate(
-    request: Request,
-    q: str = Form(...),
-    mode: str = Form("study_guide"),
-    provider: str = Form("claude_code"),  # openai | claude | claude_code
-    model: str = Form(""),
-    k: int = Form(8),
-    owner: str = Form("default"),
-):
-    """
-    Classic generate endpoint for index.html (retrieve + generate).
-    """
-    q_emb = embed_texts([q])[0]
-    res = db.query(q_emb, k=k)
-
-    docs = res.get("documents", [[]])[0]
-    metas = res.get("metadatas", [[]])[0]
-    dists = res.get("distances", [[]])[0]
-    ids = res.get("ids", [[]])[0]
-
-    items: List[Dict[str, Any]] = []
-    passages: List[Dict[str, Any]] = []
-    for i in range(len(docs)):
-        if owner and metas[i].get("owner") != owner:
-            continue
-        items.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
-        passages.append({"text": docs[i], "meta": metas[i]})
-
-    prompt = build_prompt(mode=mode, query=q, passages=passages)
-
-    try:
-        if provider == "openai":
-            out = generate_with_openai(prompt, model=model or "gpt-4.1-mini")
-        elif provider == "claude":
-            out = generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest")
-        else:
-            out = generate_with_claude_code(prompt, model=model or None)
-    except Exception as e:
-        out = f"Generation failed: {e}"
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "message": None,
-            "search_results": items,
-            "generated": out,
-        },
-    )
+    return JSONResponse({"ok": True, "assistant": assistant_msg})
 
 
 # -------------------------
-# Chatbot UI (chat.html)
+# Streaming chat endpoint (NDJSON)
 # -------------------------
 
-@app.get("/chat", response_class=HTMLResponse)
-async def chat_page(request: Request, owner: str = "default"):
-    return templates.TemplateResponse(
-        "chat.html",
-        {
-            "request": request,
-            "owner": owner,
-            "history": CHAT_HISTORY[owner],
-        },
-    )
-
-
-@app.post("/chat/message")
-async def chat_message(
+@app.post("/chat/stream")
+async def chat_stream(
     owner: str = Form("default"),
     message: str = Form(...),
     mode: str = Form("study_guide"),
@@ -248,67 +190,65 @@ async def chat_message(
     model: str = Form(""),
     k: int = Form(8),
 ):
-    user_msg = {"role": "user", "text": message, "ts": _now()}
-    CHAT_HISTORY[owner].append(user_msg)
+    """
+    Streams assistant response as NDJSON lines.
+    Each line is a JSON object: {type: "...", ...}
 
-    # Retrieve passages for grounding
-    q_emb = embed_texts([message])[0]
-    res = db.query(q_emb, k=k)
+    Types emitted:
+      - start: {type, ts}
+      - status: {type, text}
+      - sources: {type, sources: [...]}
+      - delta: {type, text}      (incremental assistant text)
+      - done: {type, ts}
+      - error: {type, message}
+    """
 
-    docs = res.get("documents", [[]])[0]
-    metas = res.get("metadatas", [[]])[0]
-    dists = res.get("distances", [[]])[0]
-    ids = res.get("ids", [[]])[0]
+    async def gen() -> AsyncGenerator[bytes, None]:
+        user_ts = _now()
+        user_msg = {"role": "user", "text": message, "ts": user_ts}
+        CHAT_HISTORY[owner].append(user_msg)
 
-    results: List[Dict[str, Any]] = []
-    passages: List[Dict[str, Any]] = []
-    for i in range(len(docs)):
-        if owner and metas[i].get("owner") != owner:
-            continue
-        item = {"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])}
-        results.append(item)
-        passages.append({"text": docs[i], "meta": metas[i]})
+        # Start
+        yield _ndjson({"type": "start", "ts": _now()})
+        yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
 
-    if not results:
-        assistant_text = (
-            "I couldn’t find anything in your ingested materials for that yet. "
-            "Try ingesting a PDF/URL first, or ask with different keywords."
-        )
-        assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": []}
-        CHAT_HISTORY[owner].append(assistant_msg)
-        return JSONResponse({"ok": True, "assistant": assistant_msg})
+        # Retrieve passages for grounding
+        try:
+            q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([message])[0])
+            res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k)))
+        except Exception as e:
+            yield _ndjson({"type": "error", "message": f"Retrieval failed: {e}"})
+            yield _ndjson({"type": "done", "ts": _now()})
+            return
 
-    prompt = build_prompt(mode=mode, query=message, passages=passages)
+        docs = res.get("documents", [[]])[0]
+        metas = res.get("metadatas", [[]])[0]
+        dists = res.get("distances", [[]])[0]
+        ids = res.get("ids", [[]])[0]
 
-    assistant_text = ""
-    gen_error: Optional[str] = None
+        results: List[Dict[str, Any]] = []
+        passages: List[Dict[str, Any]] = []
+        for i in range(len(docs)):
+            if owner and metas[i].get("owner") != owner:
+                continue
+            item = {"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])}
+            results.append(item)
+            passages.append({"text": docs[i], "meta": metas[i]})
 
-    try:
-        if provider == "openai":
-            assistant_text = generate_with_openai(prompt, model=model or "gpt-4.1-mini")
-        elif provider == "claude":
-            assistant_text = generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest")
-        elif provider == "claude_code":
-            assistant_text = generate_with_claude_code(prompt, model=model or None)
-        else:
-            gen_error = f"Unknown provider: {provider}"
-    except Exception as e:
-        gen_error = str(e)
+        if not results:
+            assistant_text = (
+                "I couldn’t find anything in your ingested materials for that yet. "
+                "Try ingesting a PDF/URL first, or ask with different keywords."
+            )
+            assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": []}
+            CHAT_HISTORY[owner].append(assistant_msg)
 
-    if gen_error:
-        top = results[:3]
-        bullets = "\n".join([f"- {r['text'][:240].strip()}…" for r in top])
-        assistant_text = (
-            "I can’t generate right now (provider/auth issue), but here are the most relevant notes I found:\n\n"
-            f"{bullets}\n\n"
-            "If you set a provider (OpenAI/Claude/Claude Code), I can turn this into a study guide/quiz."
-        )
+            # Stream it as a single delta
+            yield _ndjson({"type": "delta", "text": assistant_text})
+            yield _ndjson({"type": "done", "ts": _now()})
+            return
 
-    assistant_msg = {
-        "role": "assistant",
-        "text": assistant_text,
-        "ts": _now(),
-        "sources": [
+        sources_payload = [
             {
                 "source": r["meta"].get("source"),
                 "kind": r["meta"].get("kind"),
@@ -317,14 +257,55 @@ async def chat_message(
                 "preview": r["text"][:240],
             }
             for r in results[:5]
-        ],
-    }
-    CHAT_HISTORY[owner].append(assistant_msg)
+        ]
+        yield _ndjson({"type": "sources", "sources": sources_payload})
 
-    return JSONResponse({"ok": True, "assistant": assistant_msg})
+        prompt = build_prompt(mode=mode, query=message, passages=passages)
 
+        yield _ndjson({"type": "status", "text": "Thinking…"})
 
-@app.post("/chat/clear")
-async def chat_clear(owner: str = Form("default")):
-    CHAT_HISTORY[owner].clear()
-    return JSONResponse({"ok": True})
+        # Generate (non-streaming provider functions). We'll stream chunks of the final text.
+        assistant_text = ""
+        gen_error: Optional[str] = None
+
+        def _run_generate() -> str:
+            if provider == "openai":
+                return generate_with_openai(prompt, model=model or "gpt-4.1-mini")
+            if provider == "claude":
+                return generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest")
+            if provider == "claude_code":
+                return generate_with_claude_code(prompt, model=model or None)
+            raise RuntimeError(f"Unknown provider: {provider}")
+
+        try:
+            assistant_text = await anyio.to_thread.run_sync(_run_generate)
+        except Exception as e:
+            gen_error = str(e)
+
+        if gen_error:
+            top = results[:3]
+            bullets = "\n".join([f"- {r['text'][:240].strip()}…" for r in top])
+            assistant_text = (
+                "I can’t generate right now (provider/auth issue), but here are the most relevant notes I found:\n\n"
+                f"{bullets}\n\n"
+                "If you set a provider (OpenAI/Claude/Claude Code), I can turn this into a study guide/quiz."
+            )
+
+        # Stream chunks (pseudo-streaming)
+        chunk_size = 60
+        for i in range(0, len(assistant_text), chunk_size):
+            yield _ndjson({"type": "delta", "text": assistant_text[i : i + chunk_size]})
+            # tiny delay keeps UI smooth; adjust or remove as desired
+            await asyncio.sleep(0.01)
+
+        assistant_msg = {
+            "role": "assistant",
+            "text": assistant_text,
+            "ts": _now(),
+            "sources": sources_payload,
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+
+        yield _ndjson({"type": "done", "ts": _now()})
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")

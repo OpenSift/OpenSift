@@ -7,11 +7,11 @@
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #0b1020; color: #e9eefc; }
       .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
-      .header { display:flex; align-items:center; justify-content:space-between; gap: 10px; }
-      .brand { display:flex; align-items:center; gap:10px; }
+      .header { display:flex; align-items:center; justify-content:space-between; gap: 10px; flex-wrap: wrap; }
+      .brand { display:flex; align-items:center; gap:10px; flex-wrap: wrap; }
       .brand h1 { font-size: 18px; margin: 0; }
-      .pill { font-size: 12px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: rgba(233,238,252,.9); }
-      .chat { margin-top: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 14px; height: 62vh; overflow:auto; }
+      .pill { font-size: 12px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: rgba(233,238,252,.9); text-decoration:none; }
+      .chat { margin-top: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 14px; height: 58vh; overflow:auto; }
       .msg { display:flex; margin: 10px 0; }
       .msg.user { justify-content:flex-end; }
       .bubble { max-width: 78%; padding: 10px 12px; border-radius: 14px; line-height: 1.35; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
@@ -22,17 +22,24 @@
       .controls { display:grid; grid-template-columns: 1.2fr 1fr 1fr 0.7fr; gap: 10px; }
       input, select, textarea { width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.06); color: #e9eefc; }
       textarea { min-height: 56px; resize: vertical; }
-      .actions { display:flex; gap:10px; justify-content:space-between; align-items:center; }
+      .actions { display:flex; gap:10px; justify-content:space-between; align-items:center; flex-wrap: wrap; }
       button { padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.10); color: #e9eefc; cursor:pointer; }
       button.primary { background: #2a3fff; border-color: #2a3fff; color:#fff; }
       button.danger { background: rgba(255,70,70,.18); border-color: rgba(255,70,70,.35); }
+      button.ghost { background: transparent; }
       .sources { margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,.18); }
       .source { font-size: 12px; opacity: .9; margin: 8px 0; }
       .source a { color: #9fb0ff; text-decoration:none; }
       .hint { font-size: 12px; opacity: .75; }
+      .panel { margin-top: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 12px; }
+      .panel h2 { margin: 0 0 10px; font-size: 14px; }
+      .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       @media (max-width: 900px){
         .controls { grid-template-columns: 1fr 1fr; }
+        .grid2 { grid-template-columns: 1fr; }
       }
+      .spinner { display:none; font-size: 12px; opacity: .8; }
+      .spinner.on { display:inline; }
     </style>
   </head>
   <body>
@@ -42,9 +49,10 @@
           <h1>OpenSift</h1>
           <span class="pill">Chat</span>
           <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
+          <span class="pill spinner" id="busy">Working…</span>
         </div>
-        <div style="display:flex; gap:10px;">
-          <a class="pill" href="/">Ingest</a>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="ghost" id="toggleIngestBtn" type="button">Ingest</button>
           <button class="danger" id="clearBtn" type="button">Clear chat</button>
         </div>
       </div>
@@ -74,6 +82,30 @@
         {% endfor %}
       </div>
 
+      <!-- Ingest panel -->
+      <div class="panel" id="ingestPanel" style="display:none;">
+        <h2>Ingest (into this owner)</h2>
+
+        <div class="grid2">
+          <div>
+            <div class="hint">Ingest URL</div>
+            <input id="ingestTitle" placeholder="Source title (optional)" />
+            <input id="ingestUrl" placeholder="https://…" />
+            <button id="ingestUrlBtn" type="button">Ingest URL</button>
+          </div>
+
+          <div>
+            <div class="hint">Upload file (.pdf, .txt, .md)</div>
+            <input id="ingestFile" type="file" />
+            <button id="ingestFileBtn" type="button">Upload & Ingest</button>
+          </div>
+        </div>
+
+        <div class="hint" style="margin-top:10px;">
+          Tip: Use owners like <code>bio101</code> or <code>cs_midterm</code> to keep topics separate.
+        </div>
+      </div>
+
       <div class="composer">
         <div class="controls">
           <input id="owner" value="{{ owner }}" placeholder="owner (namespace)" />
@@ -93,7 +125,7 @@
         <textarea id="msg" placeholder="Ask OpenSift… (Shift+Enter for newline)"></textarea>
 
         <div class="actions">
-          <div class="hint">Tip: use owners like <code>bio101</code> or <code>cs_midterm</code> to keep chats separate.</div>
+          <div class="hint">Enter sends. Shift+Enter for newline.</div>
           <button class="primary" id="sendBtn" type="button">Send</button>
         </div>
       </div>
@@ -110,7 +142,18 @@
       const sendBtn = document.getElementById("sendBtn");
       const clearBtn = document.getElementById("clearBtn");
 
+      const ingestPanel = document.getElementById("ingestPanel");
+      const toggleIngestBtn = document.getElementById("toggleIngestBtn");
+      const ingestTitleEl = document.getElementById("ingestTitle");
+      const ingestUrlEl = document.getElementById("ingestUrl");
+      const ingestUrlBtn = document.getElementById("ingestUrlBtn");
+      const ingestFileEl = document.getElementById("ingestFile");
+      const ingestFileBtn = document.getElementById("ingestFileBtn");
+
+      const busy = document.getElementById("busy");
+
       function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
+      function setBusy(on) { busy.classList.toggle("on", !!on); }
 
       function addBubble(role, text, ts, sources) {
         const msg = document.createElement("div");
@@ -118,7 +161,11 @@
 
         const bubble = document.createElement("div");
         bubble.className = "bubble";
-        bubble.textContent = text;
+
+        const textNode = document.createElement("div");
+        textNode.className = "text";
+        textNode.textContent = text;
+        bubble.appendChild(textNode);
 
         const meta = document.createElement("div");
         meta.className = "meta";
@@ -126,85 +173,222 @@
         bubble.appendChild(meta);
 
         if (role === "assistant" && sources && sources.length) {
-          const sourcesDiv = document.createElement("div");
-          sourcesDiv.className = "sources";
-
-          const hint = document.createElement("div");
-          hint.className = "hint";
-          hint.textContent = "Sources:";
-          sourcesDiv.appendChild(hint);
-
-          sources.forEach(s => {
-            const item = document.createElement("div");
-            item.className = "source";
-
-            const title = document.createElement("div");
-            title.innerHTML = `<strong>${s.source || "source"}</strong>` +
-              (s.url ? ` · <a href="${s.url}" target="_blank">link</a>` : "") +
-              (typeof s.distance === "number" ? ` · d=${s.distance.toFixed(4)}` : "");
-            item.appendChild(title);
-
-            const prev = document.createElement("div");
-            prev.className = "hint";
-            prev.textContent = (s.preview || "") + "…";
-            item.appendChild(prev);
-
-            sourcesDiv.appendChild(item);
-          });
-
+          const sourcesDiv = renderSources(sources);
           bubble.appendChild(sourcesDiv);
         }
 
         msg.appendChild(bubble);
         chat.appendChild(msg);
         scrollToBottom();
+
+        return { msgEl: msg, bubbleEl: bubble, textEl: textNode };
       }
 
-      async function send() {
-        const owner = ownerEl.value.trim() || "default";
+      function renderSources(sources) {
+        const sourcesDiv = document.createElement("div");
+        sourcesDiv.className = "sources";
+
+        const hint = document.createElement("div");
+        hint.className = "hint";
+        hint.textContent = "Sources:";
+        sourcesDiv.appendChild(hint);
+
+        sources.forEach(s => {
+          const item = document.createElement("div");
+          item.className = "source";
+
+          const title = document.createElement("div");
+          title.innerHTML =
+            `<strong>${s.source || "source"}</strong>` +
+            (s.url ? ` · <a href="${s.url}" target="_blank">link</a>` : "") +
+            (typeof s.distance === "number" ? ` · d=${s.distance.toFixed(4)}` : "");
+          item.appendChild(title);
+
+          const prev = document.createElement("div");
+          prev.className = "hint";
+          prev.textContent = (s.preview || "") + "…";
+          item.appendChild(prev);
+
+          sourcesDiv.appendChild(item);
+        });
+
+        return sourcesDiv;
+      }
+
+      function owner() {
+        const o = ownerEl.value.trim() || "default";
+        ownerLabel.textContent = o;
+        return o;
+      }
+
+      async function sendStream() {
+        const o = owner();
         const message = msgEl.value.trim();
         if (!message) return;
 
-        ownerLabel.textContent = owner;
-
-        // Optimistic UI
         addBubble("user", message, new Date().toISOString(), null);
         msgEl.value = "";
         sendBtn.disabled = true;
+        setBusy(true);
+
+        // Create assistant bubble immediately (stream into it)
+        const a = addBubble("assistant", "", new Date().toISOString(), null);
 
         const form = new FormData();
-        form.append("owner", owner);
+        form.append("owner", o);
         form.append("message", message);
         form.append("mode", modeEl.value);
         form.append("provider", providerEl.value);
         form.append("k", kEl.value);
 
-        const res = await fetch("/chat/message", { method: "POST", body: form });
-        const data = await res.json();
-
-        if (data.ok && data.assistant) {
-          addBubble("assistant", data.assistant.text, data.assistant.ts, data.assistant.sources);
-        } else {
-          addBubble("assistant", "Something went wrong sending that message.", new Date().toISOString(), null);
+        const res = await fetch("/chat/stream", { method: "POST", body: form });
+        if (!res.ok || !res.body) {
+          a.textEl.textContent = "Streaming failed to start.";
+          setBusy(false);
+          sendBtn.disabled = false;
+          return;
         }
 
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let sourcesDiv = null;
+
+        function setAssistantTextAppend(delta) {
+          a.textEl.textContent += delta;
+          scrollToBottom();
+        }
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+
+            if (!line) continue;
+
+            let evt;
+            try { evt = JSON.parse(line); } catch { continue; }
+
+            if (evt.type === "status") {
+              // You can optionally show status messages somewhere; for now we append subtle text
+              // (comment out if you don't want it)
+              // setAssistantTextAppend(`\n\n[${evt.text}]\n`);
+              continue;
+            }
+
+            if (evt.type === "sources" && evt.sources) {
+              // Render sources section once
+              sourcesDiv = renderSources(evt.sources);
+              a.bubbleEl.appendChild(sourcesDiv);
+              scrollToBottom();
+              continue;
+            }
+
+            if (evt.type === "delta") {
+              setAssistantTextAppend(evt.text || "");
+              continue;
+            }
+
+            if (evt.type === "error") {
+              setAssistantTextAppend(`\n\nError: ${evt.message || "unknown error"}`);
+              continue;
+            }
+
+            if (evt.type === "done") {
+              // done
+              continue;
+            }
+          }
+        }
+
+        setBusy(false);
         sendBtn.disabled = false;
+      }
+
+      async function ingestUrl() {
+        const o = owner();
+        const url = ingestUrlEl.value.trim();
+        if (!url) return;
+
+        addBubble("user", `Ingest URL: ${url}`, new Date().toISOString(), null);
+        ingestUrlBtn.disabled = true;
+        setBusy(true);
+
+        const form = new FormData();
+        form.append("owner", o);
+        form.append("url", url);
+        form.append("source_title", ingestTitleEl.value.trim());
+
+        const res = await fetch("/chat/ingest/url", { method: "POST", body: form });
+        const data = await res.json();
+
+        if (data.assistant) {
+          addBubble("assistant", data.assistant.text, data.assistant.ts, data.assistant.sources || []);
+        } else {
+          addBubble("assistant", "URL ingest failed.", new Date().toISOString(), []);
+        }
+
+        ingestUrlEl.value = "";
+        ingestTitleEl.value = "";
+
+        setBusy(false);
+        ingestUrlBtn.disabled = false;
+      }
+
+      async function ingestFile() {
+        const o = owner();
+        const file = ingestFileEl.files && ingestFileEl.files[0];
+        if (!file) return;
+
+        addBubble("user", `Upload & ingest: ${file.name}`, new Date().toISOString(), null);
+        ingestFileBtn.disabled = true;
+        setBusy(true);
+
+        const form = new FormData();
+        form.append("owner", o);
+        form.append("file", file);
+
+        const res = await fetch("/chat/ingest/file", { method: "POST", body: form });
+        const data = await res.json();
+
+        if (data.assistant) {
+          addBubble("assistant", data.assistant.text, data.assistant.ts, data.assistant.sources || []);
+        } else {
+          addBubble("assistant", "File ingest failed.", new Date().toISOString(), []);
+        }
+
+        ingestFileEl.value = "";
+
+        setBusy(false);
+        ingestFileBtn.disabled = false;
       }
 
       async function clearChat() {
         const form = new FormData();
-        form.append("owner", ownerEl.value.trim() || "default");
+        form.append("owner", owner());
         await fetch("/chat/clear", { method: "POST", body: form });
         chat.innerHTML = "";
       }
 
-      sendBtn.addEventListener("click", send);
+      toggleIngestBtn.addEventListener("click", () => {
+        ingestPanel.style.display = ingestPanel.style.display === "none" ? "block" : "none";
+      });
+
+      sendBtn.addEventListener("click", sendStream);
       clearBtn.addEventListener("click", clearChat);
+
+      ingestUrlBtn.addEventListener("click", ingestUrl);
+      ingestFileBtn.addEventListener("click", ingestFile);
 
       msgEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
-          send();
+          sendStream();
         }
       });
 

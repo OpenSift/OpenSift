@@ -25,7 +25,7 @@
   <body>
     <h1>OpenSift</h1>
     <p>Sift through URLs, PDFs, and notes. Ingest once. Search anytime.</p>
-    <a href="/chat?owner=default">Open Chat</a>
+    
     {% if request.query_params.get("msg") %}
       <div class="msg">{{ request.query_params.get("msg") }}</div>
     {% endif %}
@@ -113,6 +113,8 @@
 
         <button type="submit">Generate</button>
       </form>
+
+      <a href="/chat?owner=default">Open Chat</a>
     </div>
 
     {% if search_results %}
