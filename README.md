@@ -81,7 +81,7 @@ If no provider is configured, OpenSift will still retrieve relevant passages but
 ## 4. Run the app
 
 ```
-uvicorn ui_app:app --reload --port 8001
+uvicorn ui_app:app --reload --host 127.0.0.1 --port 8001
 ```
 
 

@@ -9,9 +9,10 @@ from typing import Any, AsyncGenerator, DefaultDict, Dict, List, Optional
 
 import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import StreamingResponse
 
 from app.chunking import chunk_text
@@ -28,7 +29,7 @@ from app.vectordb import VectorDB
 # Ensure UI can mount even if empty
 os.makedirs("static", exist_ok=True)
 
-app = FastAPI(title="OpenSift UI", version="0.4.0")
+app = FastAPI(title="OpenSift UI", version="0.4.1")
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -48,11 +49,43 @@ def _ndjson(obj: Dict[str, Any]) -> bytes:
 
 
 # -------------------------
+# Localhost-only security
+# -------------------------
+
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
+
+class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Client IP as seen by uvicorn/starlette
+        client_host = request.client.host if request.client else ""
+        # Host header (may include port)
+        host_header = request.headers.get("host", "")
+        host_only = host_header.split(":")[0].strip().lower()
+
+        # Allow only loopback IPs AND localhost-ish Host headers.
+        # This prevents accidental exposure if someone runs with --host 0.0.0.0.
+        is_loopback_ip = client_host in ("127.0.0.1", "::1")
+        is_allowed_host = host_only in ALLOWED_HOSTS
+
+        if not (is_loopback_ip and is_allowed_host):
+            return PlainTextResponse(
+                "OpenSift UI is configured for localhost-only access.",
+                status_code=403,
+            )
+
+        return await call_next(request)
+
+
+app.add_middleware(LocalhostOnlyMiddleware)
+
+
+# -------------------------
 # Chatbot UI (chat.html)
 # -------------------------
 
 @app.get("/", response_class=HTMLResponse)
-async def root_redirect_to_chat(request: Request, owner: str = "default"):
+async def root_chat(request: Request, owner: str = "default"):
     # Chat-first UI
     return templates.TemplateResponse(
         "chat.html",
@@ -243,7 +276,6 @@ async def chat_stream(
             assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": []}
             CHAT_HISTORY[owner].append(assistant_msg)
 
-            # Stream it as a single delta
             yield _ndjson({"type": "delta", "text": assistant_text})
             yield _ndjson({"type": "done", "ts": _now()})
             return
@@ -261,10 +293,8 @@ async def chat_stream(
         yield _ndjson({"type": "sources", "sources": sources_payload})
 
         prompt = build_prompt(mode=mode, query=message, passages=passages)
-
         yield _ndjson({"type": "status", "text": "Thinking…"})
 
-        # Generate (non-streaming provider functions). We'll stream chunks of the final text.
         assistant_text = ""
         gen_error: Optional[str] = None
 
@@ -291,11 +321,10 @@ async def chat_stream(
                 "If you set a provider (OpenAI/Claude/Claude Code), I can turn this into a study guide/quiz."
             )
 
-        # Stream chunks (pseudo-streaming)
+        # Pseudo-streaming (chunked)
         chunk_size = 60
         for i in range(0, len(assistant_text), chunk_size):
             yield _ndjson({"type": "delta", "text": assistant_text[i : i + chunk_size]})
-            # tiny delay keeps UI smooth; adjust or remove as desired
             await asyncio.sleep(0.01)
 
         assistant_msg = {
