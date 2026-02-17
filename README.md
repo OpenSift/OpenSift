@@ -98,13 +98,13 @@ python opensift.py ui --reload
 ✅ Terminal chatbot
 
 ```
-python opensift.py terminal
+python opensift.py terminal --provider claude_code
 ```
 
 Example: separate class namespace + quiz mode:
 
 ```
-python opensift.py terminal --owner bio101 --mode quiz
+python opensift.py terminal --provider claude_code --owner bio101 --mode quiz
 ```
 Then inside the terminal chat:
 	•	Ingest a URL:
