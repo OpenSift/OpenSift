@@ -53,6 +53,7 @@ source .venv/bin/activate
 pip install -U pip setuptools wheel
 pip install openai
 pip install anthropic
+pip install sentence-transformers
 pip install -r requirements.txt
 ```
 
