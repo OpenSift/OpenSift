@@ -1,3 +1,5 @@
 *.json
 .env
 *.env
+*.log
+.opensift_logs/*

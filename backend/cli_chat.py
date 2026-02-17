@@ -14,6 +14,7 @@ import anyio
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts
+from app.logging_utils import configure_logging
 from app.providers import (
     DEFAULT_CLAUDE_MODEL,
     DEFAULT_OPENAI_MODEL,
@@ -25,6 +26,8 @@ from app.providers import (
 from app.vectordb import VectorDB
 
 from session_store import DEFAULT_DIR, list_sessions, load_session, save_session
+
+logger = configure_logging("opensift.cli")
 
 
 @dataclass
@@ -108,6 +111,7 @@ def _infer_and_extract_text(path: str, data: bytes) -> tuple[str, str]:
 
 
 async def ingest_url(db: VectorDB, owner: str, url: str, source_title: str = "") -> Dict[str, Any]:
+    t0 = time.perf_counter()
     title, text = await fetch_url_text(url)
     source = source_title.strip() or title
     prefix = f"{owner}::{source}" if owner else source
@@ -122,11 +126,19 @@ async def ingest_url(db: VectorDB, owner: str, url: str, source_title: str = "")
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    logger.info(
+        "cli_ingest_url_success owner=%s source=%s chunks=%d duration_ms=%.2f",
+        owner,
+        source,
+        len(chunks),
+        (time.perf_counter() - t0) * 1000.0,
+    )
 
     return {"ok": True, "ingested": len(chunks), "source": source, "url": url, "owner": owner}
 
 
 async def ingest_file(db: VectorDB, owner: str, path: str) -> Dict[str, Any]:
+    t0 = time.perf_counter()
     data = await anyio.to_thread.run_sync(lambda: _read_file_bytes(path))
     kind, text = await anyio.to_thread.run_sync(lambda: _infer_and_extract_text(path, data))
 
@@ -143,6 +155,13 @@ async def ingest_file(db: VectorDB, owner: str, path: str) -> Dict[str, Any]:
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    logger.info(
+        "cli_ingest_file_success owner=%s source=%s chunks=%d duration_ms=%.2f",
+        owner,
+        filename,
+        len(chunks),
+        (time.perf_counter() - t0) * 1000.0,
+    )
 
     return {"ok": True, "ingested": len(chunks), "source": filename, "path": path, "owner": owner}
 
@@ -213,6 +232,7 @@ async def answer(
     question: str,
     history_enabled: bool,
 ) -> None:
+    t0 = time.perf_counter()
     print("\n" + "-" * 72)
     print(f"YOU: {question}\n")
 
@@ -225,6 +245,7 @@ async def answer(
         owner_where = {"owner": cfg.owner} if cfg.owner else None
         res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(cfg.k), where=owner_where))
     except Exception as e:
+        logger.exception("cli_retrieval_failed owner=%s", cfg.owner)
         msg = f"⚠️ Retrieval failed: {e}"
         print(_wrap(msg, cfg.wrap))
         history.append({"role": "assistant", "text": msg, "ts": _now(), "sources": []})
@@ -262,6 +283,7 @@ async def answer(
             pass
 
     if not results:
+        logger.info("cli_no_results owner=%s k=%d", cfg.owner, int(cfg.k))
         msg = "🤷 No matches yet. Ingest a URL/PDF first, or try different keywords."
         print(_wrap(msg, cfg.wrap))
         history.append({"role": "assistant", "text": msg, "ts": _now(), "sources": []})
@@ -319,6 +341,14 @@ async def answer(
 
     history.append({"role": "assistant", "text": assistant_text, "ts": _now(), "sources": sources_payload})
     save_session(cfg.owner, history, DEFAULT_DIR)
+    logger.info(
+        "cli_answer_done owner=%s mode=%s provider=%s response_chars=%d duration_ms=%.2f",
+        cfg.owner,
+        cfg.mode,
+        cfg.provider,
+        len(assistant_text or ""),
+        (time.perf_counter() - t0) * 1000.0,
+    )
 
     print("\n" + "-" * 72 + "\n")
 

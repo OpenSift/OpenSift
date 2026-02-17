@@ -12,6 +12,10 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from app.logging_utils import configure_logging
+
+logger = configure_logging("opensift.launcher")
+
 
 def run_ui(host: str, port: int, reload: bool) -> None:
     import uvicorn  # type: ignore
@@ -187,12 +191,14 @@ def run_gateway(host: str, port: int, reload: bool, with_mcp: bool, health_timeo
     ui_proc = subprocess.Popen(ui_cmd)
     managed.append(ManagedProc(name="ui", proc=ui_proc))
     print(f"[gateway] starting ui (pid={ui_proc.pid}) -> http://{host}:{port}")
+    logger.info("gateway_start_ui pid=%d host=%s port=%d reload=%s", ui_proc.pid, host, port, reload)
 
     if with_mcp:
         mcp_cmd = [sys.executable, "mcp_server.py"]
         mcp_proc = subprocess.Popen(mcp_cmd)
         managed.append(ManagedProc(name="mcp", proc=mcp_proc))
         print(f"[gateway] starting mcp (pid={mcp_proc.pid}) -> stdio")
+        logger.info("gateway_start_mcp pid=%d", mcp_proc.pid)
 
     stop_flag = {"stop": False}
 
@@ -207,11 +213,13 @@ def run_gateway(host: str, port: int, reload: bool, with_mcp: bool, health_timeo
     ok = _wait_for_http_health(health_url, timeout_s=health_timeout)
     if not ok:
         print(f"[gateway] ui health check failed after {health_timeout:.1f}s: {health_url}")
+        logger.error("gateway_health_failed url=%s timeout_s=%.1f", health_url, health_timeout)
         _terminate_managed(managed)
         return 1
 
     print(f"[gateway] ui is healthy: {health_url}")
     print("[gateway] running. Press Ctrl+C to stop all services.")
+    logger.info("gateway_running health_url=%s", health_url)
 
     try:
         while not stop_flag["stop"]:
@@ -219,6 +227,7 @@ def run_gateway(host: str, port: int, reload: bool, with_mcp: bool, health_timeo
                 rc = mp.proc.poll()
                 if rc is not None:
                     print(f"[gateway] service '{mp.name}' exited with code {rc}")
+                    logger.error("gateway_service_exited name=%s rc=%d", mp.name, rc)
                     _terminate_managed(managed)
                     return rc if rc != 0 else 1
             time.sleep(0.4)
@@ -362,14 +371,24 @@ def main() -> None:
     os.chdir(this_dir)
 
     if args.cmd == "setup":
+        logger.info("launcher_cmd setup")
         run_setup()
         return
 
     if args.cmd == "ui":
+        logger.info("launcher_cmd ui host=%s port=%d reload=%s", args.host, args.port, args.reload)
         run_ui(args.host, args.port, args.reload)
         return
 
     if args.cmd == "gateway":
+        logger.info(
+            "launcher_cmd gateway host=%s port=%d reload=%s with_mcp=%s health_timeout=%.1f",
+            args.host,
+            args.port,
+            args.reload,
+            args.with_mcp,
+            args.health_timeout,
+        )
         rc = run_gateway(
             host=args.host,
             port=args.port,
@@ -380,6 +399,7 @@ def main() -> None:
         raise SystemExit(rc)
 
     if args.cmd == "terminal":
+        logger.info("launcher_cmd terminal owner=%s mode=%s provider=%s", args.owner, args.mode, args.provider)
         forwarded = [
             "--owner",
             args.owner,

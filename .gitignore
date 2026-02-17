@@ -420,3 +420,4 @@ FodyWeavers.xsd
 .chroma/*
 .opensift_auth.json
 *.json
+*.log

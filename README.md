@@ -244,7 +244,18 @@ Optional but recommended:
 ```
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
+OPENSIFT_LOG_LEVEL=INFO
+OPENSIFT_LOG_DIR=.opensift_logs
+OPENSIFT_LOG_MAX_BYTES=5242880
+OPENSIFT_LOG_BACKUP_COUNT=5
 ```
+
+🧾 Logging
+
+OpenSift now includes centralized logging across UI, gateway, terminal chat, and MCP server.
+- Default log file: `backend/.opensift_logs/opensift.log`
+- Console logging + rotating file logs are enabled by default
+- Configure with `OPENSIFT_LOG_*` env vars above
 
 🧭 Roadmap
 	•	True token streaming from providers

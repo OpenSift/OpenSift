@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import Any, AsyncGenerator, Deque, DefaultDict, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -25,6 +26,7 @@ from starlette.status import HTTP_303_SEE_OTHER
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts
+from app.logging_utils import configure_logging
 from app.providers import (
     DEFAULT_CLAUDE_MODEL,
     DEFAULT_OPENAI_MODEL,
@@ -55,6 +57,7 @@ os.makedirs("templates", exist_ok=True)
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 
 app = FastAPI(title="OpenSift UI", version="0.6.0")
+logger = configure_logging("opensift.ui")
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -143,6 +146,46 @@ class LocalhostOnlyMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(LocalhostOnlyMiddleware)
+
+
+class AccessLogMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or uuid4().hex[:12]
+        start = time.perf_counter()
+        method = request.method.upper()
+        path = request.url.path
+        client_ip = request.client.host if request.client else "unknown"
+
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        except Exception:
+            dur_ms = (time.perf_counter() - start) * 1000.0
+            logger.exception(
+                "request_failed id=%s method=%s path=%s client=%s duration_ms=%.2f",
+                request_id,
+                method,
+                path,
+                client_ip,
+                dur_ms,
+            )
+            raise
+
+        dur_ms = (time.perf_counter() - start) * 1000.0
+        response.headers["X-Request-Id"] = request_id
+        logger.info(
+            "request id=%s method=%s path=%s status=%d client=%s duration_ms=%.2f",
+            request_id,
+            method,
+            path,
+            status,
+            client_ip,
+            dur_ms,
+        )
+        return response
+
+
+app.add_middleware(AccessLogMiddleware)
 
 # -----------------------------------------------------------------------------
 # Rate limiting (in-memory sliding window)
@@ -372,15 +415,13 @@ app.add_middleware(AuthMiddleware)
 
 @app.on_event("startup")
 async def _print_startup_token():
-    print("\n" + "=" * 72)
-    print("OpenSift Local Auth")
-    print(f"Generated login token (valid until restart): {GEN_TOKEN}")
-    print(f"Password set: {'YES' if _has_password() else 'NO'}")
-    print(f"Sessions dir: {SESSION_DIR}")
-    print(f"Study library dir: {STUDY_DIR}")
-    print(f"Quiz attempts dir: {QUIZ_DIR}")
-    print(f"Flashcards dir: {FLASHCARD_DIR}")
-    print("=" * 72 + "\n")
+    logger.info("OpenSift Local Auth")
+    logger.info("generated_login_token valid_until=restart token=%s", GEN_TOKEN)
+    logger.info("password_set=%s", "YES" if _has_password() else "NO")
+    logger.info("sessions_dir=%s", SESSION_DIR)
+    logger.info("study_library_dir=%s", STUDY_DIR)
+    logger.info("quiz_attempts_dir=%s", QUIZ_DIR)
+    logger.info("flashcards_dir=%s", FLASHCARD_DIR)
 
 
 # -----------------------------------------------------------------------------
@@ -829,6 +870,7 @@ async def flashcards_delete(owner: str = Form("default"), card_id: str = Form(..
 async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), source_title: str = Form("")):
     owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
+    t0 = time.perf_counter()
 
     raw_url = (url or "").strip()
     if not raw_url:
@@ -858,6 +900,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
         return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
     try:
+        logger.info("ingest_url_start owner=%s url=%s source_title=%s", owner, raw_url, source_title.strip())
         title, text = await fetch_url_text(raw_url)
         source = source_title.strip() or title
         prefix = f"{owner}::{source}" if owner else source
@@ -884,9 +927,22 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
         }
         CHAT_HISTORY[owner].append(assistant_msg)
         _persist_owner(owner)
+        logger.info(
+            "ingest_url_success owner=%s source=%s chunks=%d duration_ms=%.2f",
+            owner,
+            source,
+            len(chunks),
+            (time.perf_counter() - t0) * 1000.0,
+        )
         return JSONResponse({"ok": True, "assistant": assistant_msg})
 
     except Exception as e:
+        logger.exception(
+            "ingest_url_failed owner=%s url=%s duration_ms=%.2f",
+            owner,
+            raw_url,
+            (time.perf_counter() - t0) * 1000.0,
+        )
         assistant_msg = {
             "role": "assistant",
             "ts": _now(),
@@ -906,6 +962,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
 async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File(...)):
     owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
+    t0 = time.perf_counter()
 
     data = await file.read()
     filename = file.filename or "upload"
@@ -948,6 +1005,14 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    logger.info(
+        "ingest_file_success owner=%s filename=%s kind=%s chunks=%d duration_ms=%.2f",
+        owner,
+        filename,
+        kind,
+        len(chunks),
+        (time.perf_counter() - t0) * 1000.0,
+    )
 
     assistant_msg = {
         "role": "assistant",
@@ -977,8 +1042,18 @@ async def chat_stream(
 ):
     owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
+    logger.info(
+        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s",
+        owner,
+        mode,
+        provider,
+        model,
+        int(k),
+        history_enabled,
+    )
 
     async def gen() -> AsyncGenerator[bytes, None]:
+        t0 = time.perf_counter()
         user_msg = {"role": "user", "text": message, "ts": _now()}
         CHAT_HISTORY[owner].append(user_msg)
         _persist_owner(owner)
@@ -993,6 +1068,7 @@ async def chat_stream(
             res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k), where=owner_where))
         except Exception as e:
             err = f"Retrieval failed: {e}"
+            logger.exception("chat_stream_retrieval_failed owner=%s", owner)
             yield _ndjson({"type": "error", "message": err})
             assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
             CHAT_HISTORY[owner].append(assistant_msg)
@@ -1033,6 +1109,12 @@ async def chat_stream(
                 pass
 
         if not results:
+            logger.info(
+                "chat_stream_no_results owner=%s k=%d duration_ms=%.2f",
+                owner,
+                int(k),
+                (time.perf_counter() - t0) * 1000.0,
+            )
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
             assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": []}
             CHAT_HISTORY[owner].append(assistant_msg)
@@ -1099,6 +1181,7 @@ async def chat_stream(
                     await asyncio.sleep(0.01)
 
         except Exception as e:
+            logger.exception("chat_stream_generation_failed owner=%s provider=%s", owner, provider)
             bullets = "\n".join([f"- {(r['text'] or '')[:240].strip()}…" for r in results[:3]])
             assistant_text = (
                 f"⚠️ Generation failed ({e}).\n\n"
@@ -1119,6 +1202,13 @@ async def chat_stream(
         }
         CHAT_HISTORY[owner].append(assistant_msg)
         _persist_owner(owner)
+        logger.info(
+            "chat_stream_done owner=%s passages=%d response_chars=%d duration_ms=%.2f",
+            owner,
+            len(passages),
+            len(assistant_text or ""),
+            (time.perf_counter() - t0) * 1000.0,
+        )
 
         yield _ndjson({"type": "done", "ts": _now()})
 

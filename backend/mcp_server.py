@@ -9,6 +9,7 @@ from app.vectordb import VectorDB
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts  # embeddings for retrieval
+from app.logging_utils import configure_logging
 
 # Optional generation providers (only used if you added sift_generate)
 from app.providers import (
@@ -21,6 +22,7 @@ from app.providers import (
 # ✅ MUST be defined before any @mcp.tool decorators
 mcp = FastMCP("OpenSift")
 db = VectorDB()
+logger = configure_logging("opensift.mcp")
 
 
 def _detect_and_extract_text(filename: str, data: bytes) -> tuple[str, str]:
@@ -42,6 +44,7 @@ async def ingest_file(
     Ingest a file into the OpenSift vector store.
     """
     data = base64.b64decode(content_base64)
+    logger.info("mcp_ingest_file_start owner=%s filename=%s", owner, filename)
     kind, text = _detect_and_extract_text(filename, data)
     if not text.strip():
         return {"ok": False, "error": "No text extracted."}
@@ -58,6 +61,7 @@ async def ingest_file(
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    logger.info("mcp_ingest_file_success owner=%s filename=%s chunks=%d", owner, filename, len(chunks))
 
     return {"ok": True, "ingested": len(chunks), "source": filename, "owner": owner}
 
@@ -71,6 +75,7 @@ async def ingest_url(
     """
     Fetch & ingest a URL into the vector store.
     """
+    logger.info("mcp_ingest_url_start owner=%s url=%s", owner, url)
     title, text = await fetch_url_text(url)
     source = source_title or title
     prefix = f"{owner}::{source}" if owner else source
@@ -86,6 +91,7 @@ async def ingest_url(
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    logger.info("mcp_ingest_url_success owner=%s source=%s chunks=%d", owner, source, len(chunks))
 
     return {"ok": True, "ingested": len(chunks), "source": source, "url": url, "owner": owner}
 
@@ -99,6 +105,7 @@ async def search(
     """
     Retrieve top-k relevant passages for a query.
     """
+    logger.info("mcp_search_start owner=%s k=%d", owner, k)
     q_emb = embed_texts([query])[0]
     owner_where = {"owner": owner} if owner else None
     res = db.query(q_emb, k=k, where=owner_where)
@@ -141,6 +148,7 @@ async def search(
             if len(items) >= k:
                 break
 
+    logger.info("mcp_search_done owner=%s results=%d", owner, len(items))
     return {"ok": True, "query": query, "k": k, "owner": owner, "results": items}
 
 
@@ -156,6 +164,7 @@ async def sift_generate(
     """
     Retrieve passages then generate an answer using a configured provider.
     """
+    logger.info("mcp_sift_generate_start owner=%s mode=%s provider=%s", owner, mode, provider)
     res = await search(query=query, k=k, owner=owner)
     passages = [{"text": r["text"], "meta": r["meta"]} for r in res["results"]]
 
@@ -169,6 +178,7 @@ async def sift_generate(
         else:
             out = generate_with_openai(prompt, model=model or "gpt-4.1-mini")
     except Exception as e:
+        logger.exception("mcp_sift_generate_failed owner=%s provider=%s", owner, provider)
         return {
             "ok": False,
             "error": str(e),
@@ -176,6 +186,7 @@ async def sift_generate(
             "sources": res["results"],
         }
 
+    logger.info("mcp_sift_generate_done owner=%s sources=%d", owner, len(res["results"]))
     return {"ok": True, "answer": out, "sources": res["results"]}
 
 
