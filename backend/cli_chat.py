@@ -25,6 +25,7 @@ from app.providers import (
 )
 from app.soul import get_global_style, set_global_style
 from app.vectordb import VectorDB
+from app.wellness import build_break_reminder, should_add_break_reminder
 
 from session_store import DEFAULT_DIR, list_sessions, load_session, save_session
 
@@ -291,8 +292,11 @@ async def answer(
     if not results:
         logger.info("cli_no_results owner=%s k=%d", cfg.owner, int(cfg.k))
         msg = "🤷 No matches yet. Ingest a URL/PDF first, or try different keywords."
+        add_break = should_add_break_reminder(history)
+        if add_break:
+            msg = f"{msg}\n\n{build_break_reminder(history)}"
         print(_wrap(msg, cfg.wrap))
-        history.append({"role": "assistant", "text": msg, "ts": _now(), "sources": []})
+        history.append({"role": "assistant", "text": msg, "ts": _now(), "sources": [], "break_reminder": add_break})
         save_session(cfg.owner, history, DEFAULT_DIR)
         return
 
@@ -346,7 +350,21 @@ async def answer(
         assistant_text = await anyio.to_thread.run_sync(lambda: _run_generate(cfg, prompt))
         print(_wrap(assistant_text, cfg.wrap))
 
-    history.append({"role": "assistant", "text": assistant_text, "ts": _now(), "sources": sources_payload})
+    add_break = should_add_break_reminder(history)
+    if add_break:
+        reminder = build_break_reminder(history)
+        assistant_text = f"{assistant_text}\n\n{reminder}"
+        print("\n" + _wrap(reminder, cfg.wrap))
+
+    history.append(
+        {
+            "role": "assistant",
+            "text": assistant_text,
+            "ts": _now(),
+            "sources": sources_payload,
+            "break_reminder": add_break,
+        }
+    )
     save_session(cfg.owner, history, DEFAULT_DIR)
     logger.info(
         "cli_answer_done owner=%s mode=%s provider=%s response_chars=%d duration_ms=%.2f",

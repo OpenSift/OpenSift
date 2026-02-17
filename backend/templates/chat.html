@@ -79,6 +79,7 @@
       .sb-actions,
       .sb-owner,
       .sb-soul,
+      .sb-wellness,
       .sb-newchat {
         padding: 12px var(--space-3);
         border-bottom: 1px solid var(--line);
@@ -100,6 +101,19 @@
       }
 
       .soul-actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+      }
+
+      .wellness-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .wellness-actions {
         margin-top: 8px;
         display: flex;
         gap: 8px;
@@ -452,6 +466,22 @@
           <div class="hint" id="soulHint" style="margin-top:6px;">Saved globally in SOUL.md (applies everywhere)</div>
         </div>
 
+        <div class="sb-wellness">
+          <label for="wellnessEnabled">Wellness Reminders</label>
+          <label class="hint" style="display:flex; align-items:center; gap:8px;">
+            <input id="wellnessEnabled" type="checkbox" />
+            Enable break reminders
+          </label>
+          <div class="wellness-grid">
+            <input id="wellnessEveryMsgs" type="number" min="1" placeholder="Every N user msgs" />
+            <input id="wellnessMinMinutes" type="number" min="1" placeholder="Min minutes gap" />
+          </div>
+          <div class="wellness-actions">
+            <button id="saveWellnessBtn" type="button"><span class="icon">★</span>Save Wellness</button>
+          </div>
+          <div class="hint" id="wellnessHint" style="margin-top:6px;">Applies globally to UI and terminal chat.</div>
+        </div>
+
         <div class="history-wrap">
           <div class="history-title">Chats</div>
           <div class="history-list" id="historyList"></div>
@@ -576,6 +606,11 @@
       const saveSoulBtn = document.getElementById("saveSoulBtn");
       const clearSoulBtn = document.getElementById("clearSoulBtn");
       const soulHintEl = document.getElementById("soulHint");
+      const wellnessEnabledEl = document.getElementById("wellnessEnabled");
+      const wellnessEveryMsgsEl = document.getElementById("wellnessEveryMsgs");
+      const wellnessMinMinutesEl = document.getElementById("wellnessMinMinutes");
+      const saveWellnessBtn = document.getElementById("saveWellnessBtn");
+      const wellnessHintEl = document.getElementById("wellnessHint");
       const msgEl = document.getElementById("msg");
       const modeEl = document.getElementById("mode");
       const providerEl = document.getElementById("provider");
@@ -659,6 +694,44 @@
       async function clearSoulStyle() {
         soulStyleEl.value = "";
         await saveSoulStyle();
+      }
+
+      async function loadWellnessSettings() {
+        const res = await fetch("/chat/wellness");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        const s = data.settings || {};
+        wellnessEnabledEl.checked = !!s.enabled;
+        wellnessEveryMsgsEl.value = Number(s.every_user_msgs || 6);
+        wellnessMinMinutesEl.value = Number(s.min_minutes || 45);
+        wellnessHintEl.textContent = s.enabled
+          ? `Enabled: every ${wellnessEveryMsgsEl.value} user msgs, at least ${wellnessMinMinutesEl.value} min apart.`
+          : "Disabled.";
+      }
+
+      async function saveWellnessSettings() {
+        const every = Math.max(1, parseInt(wellnessEveryMsgsEl.value || "6", 10) || 6);
+        const mins = Math.max(1, parseInt(wellnessMinMinutesEl.value || "45", 10) || 45);
+        wellnessEveryMsgsEl.value = String(every);
+        wellnessMinMinutesEl.value = String(mins);
+
+        const form = new FormData();
+        form.append("enabled", wellnessEnabledEl.checked ? "true" : "false");
+        form.append("every_user_msgs", String(every));
+        form.append("min_minutes", String(mins));
+
+        const res = await fetch("/chat/wellness/set", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        const s = data.settings || {};
+        wellnessEnabledEl.checked = !!s.enabled;
+        wellnessEveryMsgsEl.value = Number(s.every_user_msgs || every);
+        wellnessMinMinutesEl.value = Number(s.min_minutes || mins);
+        wellnessHintEl.textContent = s.enabled
+          ? `Saved: every ${wellnessEveryMsgsEl.value} user msgs, at least ${wellnessMinMinutesEl.value} min apart.`
+          : "Saved: wellness reminders disabled.";
       }
 
       function autoOwnerName() {
@@ -1209,6 +1282,7 @@
       saveStudyBtn.addEventListener("click", saveLastStudy);
       saveSoulBtn.addEventListener("click", saveSoulStyle);
       clearSoulBtn.addEventListener("click", clearSoulStyle);
+      saveWellnessBtn.addEventListener("click", saveWellnessSettings);
       newChatBtn.addEventListener("click", startNewChat);
       newChatNameEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
@@ -1252,6 +1326,7 @@
       scrollToBottom();
       owner();
       loadSoulStyle();
+      loadWellnessSettings();
       loadSessions();
     </script>
   </body>

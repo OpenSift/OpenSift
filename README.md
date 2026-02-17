@@ -35,6 +35,7 @@ OpenSift helps by:
 
 # 🖼 Screenshots
 
+![Full Chat](docs/assets/full.png)
 ![Study Guide](docs/assets/study_guide.png)
 ![Key Points](docs/assets/key_points.png)
 ![Quiz Me](docs/assets/quiz_me.png)
@@ -249,6 +250,9 @@ OPENSIFT_LOG_DIR=.opensift_logs
 OPENSIFT_LOG_MAX_BYTES=5242880
 OPENSIFT_LOG_BACKUP_COUNT=5
 OPENSIFT_SOUL_PATH=~/.opensift/SOUL.md
+OPENSIFT_BREAK_REMINDERS_ENABLED=true
+OPENSIFT_BREAK_REMINDER_EVERY_USER_MSGS=6
+OPENSIFT_BREAK_REMINDER_MIN_MINUTES=45
 ```
 
 🧾 Logging
@@ -265,6 +269,14 @@ OpenSift now supports a global study style personality stored in `~/.opensift/SO
 - Terminal: use `/style`, `/style set <text>`, `/style clear`
 - Styles are injected into generation prompts while still grounding answers in retrieved sources
 - Legacy per-owner SOUL entries are automatically migrated into the global style block
+
+🧘 Wellness Break Reminders
+
+OpenSift can proactively remind learners to pause, hydrate, and rest during long study sessions.
+- Reminders can include water/stretch/mental-health/sleep cues
+- Triggered periodically during chat sessions (UI + terminal)
+- Controlled by `OPENSIFT_BREAK_REMINDER_*` environment variables
+- UI controls are available in the left sidebar (enable toggle + frequency settings)
 
 🧭 Roadmap
 	•	True token streaming from providers

@@ -37,6 +37,7 @@ from app.providers import (
 )
 from app.soul import get_global_style, set_global_style
 from app.vectordb import VectorDB
+from app.wellness import build_break_reminder, get_wellness_settings, set_wellness_settings, should_add_break_reminder
 
 from session_store import DEFAULT_DIR as SESSION_DIR, delete_session, list_sessions, load_session, save_session
 from study_store import (
@@ -725,6 +726,32 @@ async def soul_set(owner: str = Form("default"), style: str = Form("")):
     return JSONResponse({"ok": True, "scope": "global", "style": get_global_style()})
 
 
+@app.get("/chat/wellness")
+async def wellness_get():
+    return JSONResponse({"ok": True, "settings": get_wellness_settings()})
+
+
+@app.post("/chat/wellness/set")
+async def wellness_set(
+    enabled: str = Form("true"),
+    every_user_msgs: int = Form(6),
+    min_minutes: int = Form(45),
+):
+    enabled_bool = str(enabled).strip().lower() not in ("0", "false", "off", "no")
+    settings = set_wellness_settings(
+        enabled=enabled_bool,
+        every_user_msgs=max(1, int(every_user_msgs)),
+        min_minutes=max(1, int(min_minutes)),
+    )
+    logger.info(
+        "wellness_set enabled=%s every_user_msgs=%d min_minutes=%d",
+        settings["enabled"],
+        settings["every_user_msgs"],
+        settings["min_minutes"],
+    )
+    return JSONResponse({"ok": True, "settings": settings})
+
+
 # -----------------------------------------------------------------------------
 # Study library endpoints
 # -----------------------------------------------------------------------------
@@ -1132,7 +1159,17 @@ async def chat_stream(
                 (time.perf_counter() - t0) * 1000.0,
             )
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
-            assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": []}
+            add_break = should_add_break_reminder(CHAT_HISTORY[owner])
+            if add_break:
+                reminder = build_break_reminder(CHAT_HISTORY[owner])
+                assistant_text = f"{assistant_text}\n\n{reminder}"
+            assistant_msg = {
+                "role": "assistant",
+                "text": assistant_text,
+                "ts": _now(),
+                "sources": [],
+                "break_reminder": add_break,
+            }
             CHAT_HISTORY[owner].append(assistant_msg)
             _persist_owner(owner)
 
@@ -1218,6 +1255,12 @@ async def chat_stream(
             "provider": provider,
             "model": model,
         }
+        add_break = should_add_break_reminder(CHAT_HISTORY[owner])
+        if add_break:
+            reminder = build_break_reminder(CHAT_HISTORY[owner])
+            assistant_msg["text"] = f"{assistant_text}\n\n{reminder}"
+            assistant_msg["break_reminder"] = True
+            yield _ndjson({"type": "delta", "text": f"\n\n{reminder}"})
         CHAT_HISTORY[owner].append(assistant_msg)
         _persist_owner(owner)
         logger.info(
