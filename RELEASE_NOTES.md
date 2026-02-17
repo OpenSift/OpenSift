@@ -1,5 +1,51 @@
 # OpenSift Release Notes
 
+## v1.1.1-alpha (Proposed)
+Release date: 2026-02-17
+
+This patch release focuses on personality customization with a new global SOUL system that applies consistently across UI, terminal, and MCP workflows.
+
+### Highlights
+- Added global chatbot personality customization via `SOUL.md`.
+- Unified personality behavior across all owners/sessions.
+- Added automatic migration from legacy per-owner SOUL entries.
+
+### Added
+- New SOUL persistence module in `backend/app/soul.py` with:
+  - global style read/write helpers
+  - default SOUL file bootstrap and directory creation
+  - compatibility support for legacy owner sections
+- UI endpoints for global SOUL management:
+  - `GET /chat/soul`
+  - `POST /chat/soul/set`
+- MCP tools for global SOUL access:
+  - `soul_get`
+  - `soul_set`
+
+### Changed
+- SOUL scope is now global by default and applied everywhere:
+  - chat UI generation
+  - terminal generation
+  - MCP `sift_generate`
+- Default SOUL path changed to:
+  - `~/.opensift/SOUL.md`
+- SOUL UI wording updated from owner-specific style to global style.
+
+### Migration
+- Legacy per-owner SOUL entries are merged into the global style block automatically.
+- Migration runs idempotently on SOUL reads.
+- Existing users do not need manual migration commands.
+
+### Configuration
+- `OPENSIFT_SOUL_PATH` remains supported for custom SOUL location.
+- Recommended default:
+  - `OPENSIFT_SOUL_PATH=~/.opensift/SOUL.md`
+
+### Notes
+- If no global style is set, OpenSift falls back to a neutral/default study style.
+
+---
+
 ## v1.1.0-alpha (Proposed)
 Release date: 2026-02-17
 
