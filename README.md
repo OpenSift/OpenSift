@@ -1,5 +1,10 @@
 # OpenSift
 
+[![Build / Smoke Tests](https://github.com/OpenSift/OpenSift/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenSift/OpenSift/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/OpenSift/OpenSift?label=release)](https://github.com/OpenSift/OpenSift/releases)
+[![Release Date](https://img.shields.io/github/release-date/OpenSift/OpenSift?label=released)](https://github.com/OpenSift/OpenSift/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 ## Please note that this is only a hobby project, may be insecure, contain security holes, and only a proof-of-conecpt.
 
 > Sift faster. Study smarter.
