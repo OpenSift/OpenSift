@@ -100,7 +100,8 @@ async def search(
     Retrieve top-k relevant passages for a query.
     """
     q_emb = embed_texts([query])[0]
-    res = db.query(q_emb, k=k)
+    owner_where = {"owner": owner} if owner else None
+    res = db.query(q_emb, k=k, where=owner_where)
 
     docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]

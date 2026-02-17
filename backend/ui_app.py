@@ -925,7 +925,8 @@ async def chat_stream(
         # Retrieve
         try:
             q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([message])[0])
-            res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k)))
+            owner_where = {"owner": owner} if owner else None
+            res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k), where=owner_where))
         except Exception as e:
             err = f"Retrieval failed: {e}"
             yield _ndjson({"type": "error", "message": err})

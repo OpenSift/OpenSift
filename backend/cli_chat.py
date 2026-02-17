@@ -222,7 +222,8 @@ async def answer(
     # Retrieve
     try:
         q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([question])[0])
-        res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(cfg.k)))
+        owner_where = {"owner": cfg.owner} if cfg.owner else None
+        res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(cfg.k), where=owner_where))
     except Exception as e:
         msg = f"⚠️ Retrieval failed: {e}"
         print(_wrap(msg, cfg.wrap))
