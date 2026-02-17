@@ -3,121 +3,549 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>OpenSift Chat</title>
+    <title>OpenSift</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #0b1020; color: #e9eefc; }
-      .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
-      .header { display:flex; align-items:center; justify-content:space-between; gap: 10px; flex-wrap: wrap; }
-      .brand { display:flex; align-items:center; gap:10px; flex-wrap: wrap; }
-      .brand h1 { font-size: 18px; margin: 0; }
-      .pill { font-size: 12px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: rgba(233,238,252,.9); text-decoration:none; }
-      .chat { margin-top: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 14px; height: 58vh; overflow:auto; }
-      .msg { display:flex; margin: 10px 0; }
-      .msg.user { justify-content:flex-end; }
-      .bubble { max-width: 78%; padding: 10px 12px; border-radius: 14px; line-height: 1.35; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
-      .user .bubble { background: #2a3fff; color: #fff; border-top-right-radius: 6px; }
-      .assistant .bubble { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.10); border-top-left-radius: 6px; }
-      .meta { font-size: 11px; opacity: .7; margin-top: 6px; }
-      .composer { margin-top: 12px; display:grid; gap: 10px; }
-      .controls { display:grid; grid-template-columns: 1.2fr 1fr 1fr 0.7fr; gap: 10px; }
-      input, select, textarea { width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.06); color: #e9eefc; }
-      textarea { min-height: 56px; resize: vertical; }
-      .actions { display:flex; gap:10px; justify-content:space-between; align-items:center; flex-wrap: wrap; }
-      button { padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.10); color: #e9eefc; cursor:pointer; }
-      button.primary { background: #2a3fff; border-color: #2a3fff; color:#fff; }
-      button.danger { background: rgba(255,70,70,.18); border-color: rgba(255,70,70,.35); }
-      button.ghost { background: transparent; }
-      .sources { margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,.18); }
-      .source { font-size: 12px; opacity: .9; margin: 8px 0; }
-      .source a { color: #9fb0ff; text-decoration:none; }
-      .hint { font-size: 12px; opacity: .75; }
-      .panel { margin-top: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 12px; }
-      .panel h2 { margin: 0 0 10px; font-size: 14px; }
-      .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-      @media (max-width: 900px){
-        .controls { grid-template-columns: 1fr 1fr; }
-        .grid2 { grid-template-columns: 1fr; }
+      :root {
+        --bg: #090d17;
+        --bg-soft: #0e1525;
+        --panel: #101829;
+        --panel-2: #141f34;
+        --panel-3: #1a2742;
+        --text: #e9eefc;
+        --muted: #99a6c4;
+        --line: rgba(255,255,255,.10);
+        --line-strong: rgba(255,255,255,.18);
+        --brand: #4a66ff;
+        --brand-soft: rgba(74,102,255,.18);
+        --danger: #d25757;
+        --radius-sm: 10px;
+        --radius-md: 14px;
+        --radius-lg: 18px;
+        --space-1: 6px;
+        --space-2: 10px;
+        --space-3: 14px;
+        --space-4: 18px;
+        --space-5: 24px;
+        --shadow-soft: 0 8px 24px rgba(0,0,0,.26);
       }
-      .spinner { display:none; font-size: 12px; opacity: .8; }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(1250px 760px at -20% -30%, #273b7a 0%, transparent 56%),
+          radial-gradient(980px 620px at 130% -10%, #22426d 0%, transparent 58%),
+          linear-gradient(180deg, #080c16 0%, #090d17 100%);
+      }
+
+      .app {
+        height: 100vh;
+        width: 100%;
+        display: grid;
+        grid-template-columns: 320px 1fr;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+        display: grid;
+        grid-template-rows: auto auto auto 1fr auto;
+        min-height: 0;
+      }
+
+      .sb-head {
+        padding: var(--space-3);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        font-size: 17px;
+        font-weight: 650;
+        letter-spacing: .2px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .brand::before {
+        content: "◉";
+        color: var(--brand);
+        font-size: 11px;
+      }
+
+      .sb-actions,
+      .sb-owner,
+      .sb-newchat {
+        padding: 12px var(--space-3);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .sb-owner label,
+      .sb-newchat label {
+        display:block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 6px;
+        letter-spacing: .25px;
+      }
+
+      .newchat-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+
+      .history-wrap {
+        min-height: 0;
+        overflow: auto;
+        padding: 10px;
+      }
+
+      .history-title {
+        font-size: 11px;
+        color: var(--muted);
+        margin: 2px 8px 8px;
+        text-transform: uppercase;
+        letter-spacing: .65px;
+      }
+
+      .history-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .session-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(255,255,255,.02);
+        transition: border-color .2s ease, background .2s ease, transform .2s ease;
+      }
+
+      .session-item:hover {
+        border-color: var(--line-strong);
+        background: rgba(255,255,255,.035);
+        transform: translateY(-1px);
+      }
+
+      .session-item-title {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .session-item-meta {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      .session-item-actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 6px;
+      }
+
+      .sb-foot {
+        border-top: 1px solid var(--line);
+        padding: 12px;
+      }
+
+      .main {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      .topbar {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 14px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        background: rgba(255,255,255,.02);
+        backdrop-filter: blur(8px);
+      }
+
+      .topbar-left,
+      .topbar-right {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .pill {
+        font-size: 11px;
+        padding: 6px 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        color: var(--muted);
+        background: rgba(255,255,255,.03);
+      }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .workspace.tool-open {
+        grid-template-columns: minmax(0, 1fr) 370px;
+      }
+
+      .chat-zone {
+        min-width: 0;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: 1fr auto;
+      }
+
+      .chat-scroll {
+        min-height: 0;
+        overflow: auto;
+        padding: 18px 24px 6px;
+      }
+
+      .msg {
+        display: flex;
+        margin: 12px 0;
+        animation: fadeUp .22s ease;
+      }
+
+      .msg.user { justify-content:flex-end; }
+
+      .bubble {
+        max-width: min(860px, 79%);
+        padding: 12px 14px;
+        border-radius: var(--radius-md);
+        line-height: 1.42;
+        font-size: 14px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        border: 1px solid transparent;
+        box-shadow: var(--shadow-soft);
+      }
+
+      .user .bubble {
+        background: linear-gradient(180deg, #5670ff 0%, #4461ff 100%);
+        color: #fff;
+        border-top-right-radius: 6px;
+      }
+
+      .assistant .bubble {
+        background: var(--panel);
+        border-color: var(--line);
+        border-top-left-radius: 6px;
+      }
+
+      .meta {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 7px;
+      }
+
+      .composer {
+        border-top: 1px solid var(--line);
+        padding: 12px 16px 14px;
+        display: grid;
+        gap: 9px;
+        background: rgba(11,16,28,.94);
+        backdrop-filter: blur(8px);
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: 1.25fr 1fr 1fr 122px;
+        gap: 8px;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .tool-panel {
+        display: none;
+        border-left: 1px solid var(--line);
+        background: linear-gradient(180deg, var(--panel-2) 0%, #121c30 100%);
+        min-height: 0;
+        overflow: auto;
+        padding: 14px;
+      }
+
+      .workspace.tool-open .tool-panel { display: block; animation: slideIn .2s ease; }
+
+      .tool-head {
+        display:flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .tool-sections { display:none; }
+      .tool-sections.active { display:block; }
+
+      .list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(255,255,255,.02);
+      }
+
+      .item-title { font-size: 13px; font-weight: 600; }
+      .item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+      .item-preview { font-size: 12px; margin-top: 6px; white-space: pre-wrap; }
+      .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+      .study-view {
+        margin-top: 10px;
+        border-top: 1px dashed var(--line-strong);
+        padding-top: 10px;
+        white-space: pre-wrap;
+        font-size: 13px;
+      }
+
+      .hint { font-size: 11px; color: var(--muted); }
+      .spinner { display:none; }
       .spinner.on { display:inline; }
+
+      input, select, textarea, button {
+        font: inherit;
+      }
+
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-sm);
+        background: rgba(255,255,255,.03);
+        color: var(--text);
+        padding: 9px 10px;
+        transition: border-color .2s ease, background .2s ease;
+      }
+
+      input:focus, select:focus, textarea:focus {
+        outline: none;
+        border-color: rgba(74,102,255,.7);
+        background: rgba(255,255,255,.05);
+      }
+
+      textarea { min-height: 62px; resize: vertical; }
+
+      button {
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-sm);
+        background: rgba(255,255,255,.05);
+        color: var(--text);
+        padding: 9px 10px;
+        cursor: pointer;
+        transition: transform .15s ease, border-color .2s ease, background .2s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        border-color: rgba(255,255,255,.32);
+        background: rgba(255,255,255,.08);
+      }
+
+      button.primary {
+        background: linear-gradient(180deg, #5a74ff 0%, #4a66ff 100%);
+        border-color: var(--brand);
+        color: #fff;
+      }
+
+      button.primary:hover {
+        border-color: #6e85ff;
+      }
+
+      button.danger {
+        background: rgba(210,87,87,.18);
+        border-color: rgba(210,87,87,.35);
+      }
+
+      .icon {
+        font-size: 12px;
+        margin-right: 5px;
+        opacity: .9;
+      }
+
+      @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes slideIn {
+        from { opacity: 0; transform: translateX(10px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+
+      @media (max-width: 1120px) {
+        .workspace.tool-open { grid-template-columns: 1fr; }
+        .tool-panel { border-left: 0; border-top: 1px solid var(--line); }
+      }
+
+      @media (max-width: 900px) {
+        .app { grid-template-columns: 1fr; }
+        .sidebar { grid-template-rows: auto auto auto; }
+        .history-wrap, .sb-foot { max-height: 220px; }
+        .controls { grid-template-columns: 1fr 1fr; }
+        .bubble { max-width: 92%; }
+      }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <div class="header">
-        <div class="brand">
-          <h1>OpenSift</h1>
-          <span class="pill">Chat</span>
-          <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
-          <span class="pill spinner" id="busy">Working…</span>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sb-head">
+          <div class="brand">OpenSift</div>
         </div>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="ghost" id="toggleIngestBtn" type="button">Ingest</button>
-          <button class="ghost" id="logoutBtn" type="button">Logout</button>
-          <button class="danger" id="clearBtn" type="button">Clear chat</button>
-        </div>
-      </div>
 
-      <div class="chat" id="chat">
-        {% for m in history %}
-          <div class="msg {{ m.role }}">
-            <div class="bubble">
-              {{ m.text }}
-              <div class="meta">{{ m.ts }}</div>
+        <div class="sb-actions" style="display:flex; gap:8px;">
+          <button id="refreshHistoryBtn" type="button" style="width:100%;"><span class="icon">↻</span>Refresh</button>
+        </div>
+
+        <div class="sb-newchat">
+          <label for="newChatName">New Chat Name (optional)</label>
+          <div class="newchat-row">
+            <input id="newChatName" placeholder="bio302-midterm" />
+            <button id="newChatBtn" type="button" class="primary"><span class="icon">＋</span>New</button>
+          </div>
+          <div class="hint" style="margin-top:6px;">Leave blank for auto-name.</div>
+        </div>
+
+        <div class="sb-owner">
+          <label for="owner">Current Owner</label>
+          <input id="owner" value="{{ owner }}" placeholder="bio101" />
+        </div>
+
+        <div class="history-wrap">
+          <div class="history-title">Chats</div>
+          <div class="history-list" id="historyList"></div>
+        </div>
+
+        <div class="sb-foot">
+          <button id="logoutBtn" type="button" style="width:100%;"><span class="icon">⇦</span>Logout</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <div class="topbar-left">
+            <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
+            <span class="pill spinner" id="busy">Working…</span>
+            <button id="showIngestBtn" type="button"><span class="icon">⤓</span>Ingest</button>
+            <button id="showLibraryBtn" type="button"><span class="icon">☰</span>Library</button>
+            <button id="showQuizBtn" type="button"><span class="icon">✓</span>Quiz</button>
+            <button id="showFlashcardsBtn" type="button"><span class="icon">▣</span>Flashcards</button>
+          </div>
+          <div class="topbar-right">
+            <button id="saveStudyBtn" type="button"><span class="icon">★</span>Save Last</button>
+            <button id="clearBtn" type="button" class="danger"><span class="icon">✕</span>Clear</button>
+          </div>
+        </div>
+
+        <div class="workspace" id="workspace">
+          <div class="chat-zone">
+            <div class="chat-scroll" id="chat">
+              {% for m in history %}
+                <div class="msg {{ m.role }}">
+                  <div class="bubble">
+                    {{ m.text }}
+                    <div class="meta">{{ m.ts }}</div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+
+            <div class="composer">
+              <div class="controls">
+                <select id="mode">
+                  <option value="study_guide">Study Guide</option>
+                  <option value="key_points">Key Points</option>
+                  <option value="quiz">Quiz</option>
+                </select>
+                <select id="provider">
+                  <option value="claude_code">Claude Code</option>
+                  <option value="claude">Claude API</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+                <input id="k" type="number" value="8" min="1" max="20" />
+                <button class="primary" id="sendBtn" type="button"><span class="icon">➤</span>Send</button>
+              </div>
+
+              <textarea id="msg" placeholder="Ask OpenSift... (Shift+Enter newline)"></textarea>
+
+              <div class="actions">
+                <div class="hint">Enter sends. Shift+Enter for newline.</div>
+              </div>
             </div>
           </div>
-        {% endfor %}
-      </div>
 
-      <div class="panel" id="ingestPanel" style="display:none;">
-        <h2>Ingest (into this owner)</h2>
+          <aside class="tool-panel" id="toolPanel">
+            <div class="tool-head">
+              <strong id="toolTitle">Tool</strong>
+              <button id="closeToolBtn" type="button"><span class="icon">←</span>Close</button>
+            </div>
 
-        <div class="grid2">
-          <div>
-            <div class="hint">Ingest URL</div>
-            <input id="ingestTitle" placeholder="Source title (optional)" />
-            <input id="ingestUrl" placeholder="https://…" />
-            <button id="ingestUrlBtn" type="button">Ingest URL</button>
-          </div>
+            <section id="toolIngest" class="tool-sections">
+              <div class="hint" style="margin-bottom:8px;">Ingest into current owner.</div>
+              <input id="ingestTitle" placeholder="Source title (optional)" />
+              <input id="ingestUrl" placeholder="https://..." style="margin-top:8px;" />
+              <button id="ingestUrlBtn" type="button" style="margin-top:8px;"><span class="icon">⤓</span>Ingest URL</button>
+              <input id="ingestFile" type="file" style="margin-top:12px;" />
+              <button id="ingestFileBtn" type="button" style="margin-top:8px;"><span class="icon">⬆</span>Upload & Ingest</button>
+            </section>
 
-          <div>
-            <div class="hint">Upload file (.pdf, .txt, .md)</div>
-            <input id="ingestFile" type="file" />
-            <button id="ingestFileBtn" type="button">Upload & Ingest</button>
-          </div>
+            <section id="toolLibrary" class="tool-sections">
+              <div class="hint" style="margin-bottom:8px;">Saved study outputs.</div>
+              <div class="list" id="libraryList"></div>
+              <div class="study-view" id="studyView" style="display:none;"></div>
+            </section>
+
+            <section id="toolQuiz" class="tool-sections">
+              <input id="quizTitle" placeholder="Attempt title" />
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                <input id="quizScore" type="number" min="0" placeholder="Score" />
+                <input id="quizTotal" type="number" min="1" placeholder="Total" />
+              </div>
+              <textarea id="quizNotes" placeholder="Notes" style="margin-top:8px;"></textarea>
+              <button id="saveQuizAttemptBtn" type="button" style="margin-top:8px;"><span class="icon">✓</span>Save Attempt</button>
+              <div class="hint" id="quizStats" style="margin:10px 0 8px;">No attempts yet.</div>
+              <div class="list" id="quizList"></div>
+            </section>
+
+            <section id="toolFlashcards" class="tool-sections">
+              <input id="fcFront" placeholder="Front" />
+              <textarea id="fcBack" placeholder="Back" style="margin-top:8px;"></textarea>
+              <input id="fcTags" placeholder="Tags (optional)" style="margin-top:8px;" />
+              <button id="addFlashcardBtn" type="button" style="margin-top:8px;"><span class="icon">＋</span>Add Flashcard</button>
+              <label class="hint" style="display:block; margin-top:10px;">
+                <input id="fcDueOnly" type="checkbox" checked /> Show due cards only
+              </label>
+              <button id="refreshFlashcardsBtn" type="button" style="margin-top:8px;"><span class="icon">↻</span>Refresh Cards</button>
+              <div class="list" id="flashcardList" style="margin-top:10px;"></div>
+            </section>
+          </aside>
         </div>
-
-        <div class="hint" style="margin-top:10px;">
-          Tip: Use owners like <code>bio101</code> or <code>cs_midterm</code> to keep topics separate.
-        </div>
-      </div>
-
-      <div class="composer">
-        <div class="controls">
-          <input id="owner" value="{{ owner }}" placeholder="owner (namespace)" />
-          <select id="mode">
-            <option value="study_guide">Study Guide</option>
-            <option value="key_points">Key Points</option>
-            <option value="quiz">Quiz</option>
-          </select>
-          <select id="provider">
-            <option value="claude_code">Claude Code (setup-token)</option>
-            <option value="claude">Claude (API key)</option>
-            <option value="openai">OpenAI (API key)</option>
-          </select>
-          <input id="k" type="number" value="8" min="1" max="20" />
-        </div>
-
-        <textarea id="msg" placeholder="Ask OpenSift… (Shift+Enter for newline)"></textarea>
-
-        <div class="actions">
-          <div class="hint">Enter sends. Shift+Enter for newline.</div>
-          <button class="primary" id="sendBtn" type="button">Send</button>
-        </div>
-      </div>
+      </main>
     </div>
 
     <script>
+      const workspace = document.getElementById("workspace");
+      const toolTitle = document.getElementById("toolTitle");
+      const closeToolBtn = document.getElementById("closeToolBtn");
+
       const chat = document.getElementById("chat");
       const ownerEl = document.getElementById("owner");
       const ownerLabel = document.getElementById("ownerLabel");
@@ -128,19 +556,62 @@
       const sendBtn = document.getElementById("sendBtn");
       const clearBtn = document.getElementById("clearBtn");
       const logoutBtn = document.getElementById("logoutBtn");
+      const saveStudyBtn = document.getElementById("saveStudyBtn");
+      const newChatBtn = document.getElementById("newChatBtn");
+      const newChatNameEl = document.getElementById("newChatName");
+      const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
 
-      const ingestPanel = document.getElementById("ingestPanel");
-      const toggleIngestBtn = document.getElementById("toggleIngestBtn");
+      const showIngestBtn = document.getElementById("showIngestBtn");
+      const showLibraryBtn = document.getElementById("showLibraryBtn");
+      const showQuizBtn = document.getElementById("showQuizBtn");
+      const showFlashcardsBtn = document.getElementById("showFlashcardsBtn");
+
       const ingestTitleEl = document.getElementById("ingestTitle");
       const ingestUrlEl = document.getElementById("ingestUrl");
       const ingestUrlBtn = document.getElementById("ingestUrlBtn");
       const ingestFileEl = document.getElementById("ingestFile");
       const ingestFileBtn = document.getElementById("ingestFileBtn");
 
+      const historyList = document.getElementById("historyList");
+      const libraryList = document.getElementById("libraryList");
+      const studyView = document.getElementById("studyView");
+
+      const quizTitleEl = document.getElementById("quizTitle");
+      const quizScoreEl = document.getElementById("quizScore");
+      const quizTotalEl = document.getElementById("quizTotal");
+      const quizNotesEl = document.getElementById("quizNotes");
+      const quizList = document.getElementById("quizList");
+      const quizStats = document.getElementById("quizStats");
+      const saveQuizAttemptBtn = document.getElementById("saveQuizAttemptBtn");
+
+      const fcFrontEl = document.getElementById("fcFront");
+      const fcBackEl = document.getElementById("fcBack");
+      const fcTagsEl = document.getElementById("fcTags");
+      const fcDueOnlyEl = document.getElementById("fcDueOnly");
+      const addFlashcardBtn = document.getElementById("addFlashcardBtn");
+      const refreshFlashcardsBtn = document.getElementById("refreshFlashcardsBtn");
+      const flashcardList = document.getElementById("flashcardList");
+
       const busy = document.getElementById("busy");
 
       function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
       function setBusy(on) { busy.classList.toggle("on", !!on); }
+
+      function owner() {
+        const o = ownerEl.value.trim() || "default";
+        ownerLabel.textContent = o;
+        return o;
+      }
+
+      function autoOwnerName() {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        return `chat-${y}${m}${day}-${hh}${mm}`;
+      }
 
       function addBubble(role, text, ts) {
         const msg = document.createElement("div");
@@ -162,14 +633,14 @@
         msg.appendChild(bubble);
         chat.appendChild(msg);
         scrollToBottom();
-
         return { textEl: textNode };
       }
 
-      function owner() {
-        const o = ownerEl.value.trim() || "default";
-        ownerLabel.textContent = o;
-        return o;
+      function renderHistory(messages) {
+        chat.innerHTML = "";
+        for (const m of messages || []) {
+          addBubble(m.role || "assistant", m.text || "", m.ts || "");
+        }
       }
 
       async function ensureAuth(res) {
@@ -178,6 +649,21 @@
           return false;
         }
         return true;
+      }
+
+      function openTool(toolId, title) {
+        workspace.classList.add("tool-open");
+        toolTitle.textContent = title;
+        for (const el of document.querySelectorAll(".tool-sections")) {
+          el.classList.toggle("active", el.id === toolId);
+        }
+        if (toolId === "toolLibrary") loadStudyLibrary();
+        if (toolId === "toolQuiz") loadQuizHistory();
+        if (toolId === "toolFlashcards") loadFlashcards();
+      }
+
+      function closeTool() {
+        workspace.classList.remove("tool-open");
       }
 
       async function sendStream() {
@@ -216,8 +702,8 @@
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
-
           buffer += decoder.decode(value, { stream: true });
+
           let idx;
           while ((idx = buffer.indexOf("\n")) >= 0) {
             const line = buffer.slice(0, idx).trim();
@@ -226,7 +712,6 @@
 
             let evt;
             try { evt = JSON.parse(line); } catch { continue; }
-
             if (evt.type === "delta") {
               a.textEl.textContent += (evt.text || "");
               scrollToBottom();
@@ -236,6 +721,7 @@
 
         setBusy(false);
         sendBtn.disabled = false;
+        await loadSessions();
       }
 
       async function ingestUrl() {
@@ -245,7 +731,6 @@
 
         addBubble("user", `Ingest URL: ${url}`, new Date().toISOString());
         ingestUrlBtn.disabled = true;
-        setBusy(true);
 
         const form = new FormData();
         form.append("owner", o);
@@ -256,12 +741,10 @@
         if (!(await ensureAuth(res))) return;
 
         const data = await res.json();
-        addBubble("assistant", (data.assistant && data.assistant.text) ? data.assistant.text : "URL ingest failed.", new Date().toISOString());
+        addBubble("assistant", data?.assistant?.text || "URL ingest failed.", new Date().toISOString());
 
-        ingestUrlEl.value = "";
         ingestTitleEl.value = "";
-
-        setBusy(false);
+        ingestUrlEl.value = "";
         ingestUrlBtn.disabled = false;
       }
 
@@ -272,7 +755,6 @@
 
         addBubble("user", `Upload & ingest: ${file.name}`, new Date().toISOString());
         ingestFileBtn.disabled = true;
-        setBusy(true);
 
         const form = new FormData();
         form.append("owner", o);
@@ -282,11 +764,9 @@
         if (!(await ensureAuth(res))) return;
 
         const data = await res.json();
-        addBubble("assistant", (data.assistant && data.assistant.text) ? data.assistant.text : "File ingest failed.", new Date().toISOString());
+        addBubble("assistant", data?.assistant?.text || "File ingest failed.", new Date().toISOString());
 
         ingestFileEl.value = "";
-
-        setBusy(false);
         ingestFileBtn.disabled = false;
       }
 
@@ -296,6 +776,7 @@
         const res = await fetch("/chat/clear", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         chat.innerHTML = "";
+        await loadSessions();
       }
 
       async function logout() {
@@ -303,16 +784,389 @@
         window.location.href = "/login";
       }
 
-      toggleIngestBtn.addEventListener("click", () => {
-        ingestPanel.style.display = ingestPanel.style.display === "none" ? "block" : "none";
-      });
+      async function loadSessions() {
+        const res = await fetch("/chat/session/list");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const sessions = data.sessions || [];
+
+        historyList.innerHTML = "";
+        if (!sessions.length) {
+          historyList.innerHTML = '<div class="hint">No chats yet.</div>';
+          return;
+        }
+
+        for (const s of sessions) {
+          const card = document.createElement("div");
+          card.className = "session-item";
+          card.innerHTML = `
+            <div class="session-item-title">${s.owner}</div>
+            <div class="session-item-meta">${s.count || 0} msgs · ${s.last_ts || ""}</div>
+          `;
+
+          const actions = document.createElement("div");
+          actions.className = "session-item-actions";
+
+          const openBtn = document.createElement("button");
+          openBtn.type = "button";
+          openBtn.innerHTML = '<span class="icon">↗</span>Open';
+          openBtn.addEventListener("click", () => openSession(s.owner));
+
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "danger";
+          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          delBtn.addEventListener("click", () => deleteSessionByOwner(s.owner));
+
+          actions.appendChild(openBtn);
+          actions.appendChild(delBtn);
+          card.appendChild(actions);
+          historyList.appendChild(card);
+        }
+      }
+
+      async function openSession(ownerName) {
+        ownerEl.value = ownerName;
+        owner();
+        const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(ownerName)}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        renderHistory(data.history || []);
+      }
+
+      async function deleteSessionByOwner(ownerName) {
+        const form = new FormData();
+        form.append("owner", ownerName);
+        const res = await fetch("/chat/session/delete", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+
+        if (owner() === ownerName) {
+          chat.innerHTML = "";
+        }
+        await loadSessions();
+      }
+
+      async function startNewChat() {
+        const typed = (newChatNameEl.value || "").trim();
+        const nextOwner = typed || autoOwnerName();
+
+        const form = new FormData();
+        form.append("owner", nextOwner);
+        const res = await fetch("/chat/session/new", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+
+        newChatNameEl.value = "";
+        ownerEl.value = nextOwner;
+        owner();
+        chat.innerHTML = "";
+        await loadSessions();
+      }
+
+      async function loadStudyLibrary() {
+        const o = owner();
+        const res = await fetch(`/chat/study/list?owner=${encodeURIComponent(o)}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const items = data.items || [];
+        libraryList.innerHTML = "";
+
+        if (!items.length) {
+          libraryList.innerHTML = `<div class="hint">No saved items for <code>${o}</code>.</div>`;
+          return;
+        }
+
+        for (const item of items) {
+          const card = document.createElement("div");
+          card.className = "item";
+          card.innerHTML = `
+            <div class="item-title">${item.title || "Saved Study Item"}</div>
+            <div class="item-meta">${item.mode || "study"} · ${item.created_at || ""}</div>
+            <div class="item-preview">${item.preview || ""}</div>
+          `;
+
+          const actions = document.createElement("div");
+          actions.className = "item-actions";
+
+          const openBtn = document.createElement("button");
+          openBtn.type = "button";
+          openBtn.innerHTML = '<span class="icon">↗</span>Open';
+          openBtn.addEventListener("click", () => openStudyItem(item.id));
+
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "danger";
+          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          delBtn.addEventListener("click", () => deleteStudyItem(item.id));
+
+          actions.appendChild(openBtn);
+          actions.appendChild(delBtn);
+          card.appendChild(actions);
+          libraryList.appendChild(card);
+        }
+      }
+
+      async function openStudyItem(itemId) {
+        const o = owner();
+        const res = await fetch(`/chat/study/get?owner=${encodeURIComponent(o)}&item_id=${encodeURIComponent(itemId)}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const item = data.item;
+        if (!item) return;
+
+        studyView.style.display = "block";
+        studyView.textContent = `${item.title || "Saved Study Item"}\n${item.mode || "study"} · ${item.created_at || ""}\n\n${item.text || ""}`;
+      }
+
+      async function deleteStudyItem(itemId) {
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("item_id", itemId);
+        const res = await fetch("/chat/study/delete", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+
+        await loadStudyLibrary();
+        studyView.style.display = "none";
+        studyView.textContent = "";
+      }
+
+      async function saveLastStudy() {
+        const o = owner();
+        const title = window.prompt("Optional title for saved study item:", "") || "";
+        const form = new FormData();
+        form.append("owner", o);
+        form.append("title", title.trim());
+
+        const res = await fetch("/chat/study/save-last", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+
+        if (!res.ok) {
+          addBubble("assistant", "No generated answer found yet to save.", new Date().toISOString());
+          return;
+        }
+
+        const data = await res.json();
+        const savedTitle = data?.item?.title || "Saved Study Item";
+        addBubble("assistant", `Saved: ${savedTitle}`, new Date().toISOString());
+
+        if (workspace.classList.contains("tool-open") && document.getElementById("toolLibrary").classList.contains("active")) {
+          await loadStudyLibrary();
+        }
+      }
+
+      async function loadQuizHistory() {
+        const o = owner();
+        const res = await fetch(`/chat/quiz/history?owner=${encodeURIComponent(o)}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const attempts = data.attempts || [];
+        const stats = data.stats || { count: 0, avg_pct: 0 };
+        quizStats.textContent = `${stats.count} attempts · avg ${stats.avg_pct}%`;
+
+        quizList.innerHTML = "";
+        if (!attempts.length) {
+          quizList.innerHTML = '<div class="hint">No attempts yet.</div>';
+          return;
+        }
+
+        for (const a of attempts) {
+          const card = document.createElement("div");
+          card.className = "item";
+          card.innerHTML = `
+            <div class="item-title">${a.title || "Quiz Attempt"}</div>
+            <div class="item-meta">${a.score}/${a.total} (${a.pct}%) · ${a.created_at || ""}</div>
+            <div class="item-preview">${a.notes || ""}</div>
+          `;
+
+          const actions = document.createElement("div");
+          actions.className = "item-actions";
+
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "danger";
+          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          delBtn.addEventListener("click", () => deleteQuizAttempt(a.id));
+
+          actions.appendChild(delBtn);
+          card.appendChild(actions);
+          quizList.appendChild(card);
+        }
+      }
+
+      async function saveQuizAttempt() {
+        const score = parseInt(quizScoreEl.value || "", 10);
+        const total = parseInt(quizTotalEl.value || "", 10);
+        if (!Number.isFinite(score) || !Number.isFinite(total)) return;
+
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("title", quizTitleEl.value.trim());
+        form.append("score", String(score));
+        form.append("total", String(total));
+        form.append("notes", quizNotesEl.value.trim());
+
+        const res = await fetch("/chat/quiz/add", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        quizTitleEl.value = "";
+        quizScoreEl.value = "";
+        quizTotalEl.value = "";
+        quizNotesEl.value = "";
+        await loadQuizHistory();
+      }
+
+      async function deleteQuizAttempt(attemptId) {
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("attempt_id", attemptId);
+        const res = await fetch("/chat/quiz/delete", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        await loadQuizHistory();
+      }
+
+      async function loadFlashcards() {
+        const o = owner();
+        const dueOnly = fcDueOnlyEl.checked ? "true" : "false";
+        const res = await fetch(`/chat/flashcards/list?owner=${encodeURIComponent(o)}&due_only=${dueOnly}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const cards = data.cards || [];
+        flashcardList.innerHTML = "";
+
+        if (!cards.length) {
+          flashcardList.innerHTML = '<div class="hint">No cards for this filter.</div>';
+          return;
+        }
+
+        for (const c of cards) {
+          const card = document.createElement("div");
+          card.className = "item";
+          card.innerHTML = `
+            <div class="item-title">${c.front || ""}</div>
+            <div class="item-meta">due: ${c.due_at || ""} · interval: ${c.interval_days || 0}d · streak: ${c.streak || 0}</div>
+            <div class="item-preview" style="display:none;" id="back-${c.id}">${c.back || ""}</div>
+            <div class="item-meta">${c.tags || ""}</div>
+          `;
+
+          const actions = document.createElement("div");
+          actions.className = "item-actions";
+
+          const showBtn = document.createElement("button");
+          showBtn.type = "button";
+          showBtn.innerHTML = '<span class="icon">◷</span>Show';
+          showBtn.addEventListener("click", () => {
+            const back = document.getElementById(`back-${c.id}`);
+            const visible = back.style.display !== "none";
+            back.style.display = visible ? "none" : "block";
+            showBtn.innerHTML = visible ? '<span class="icon">◷</span>Show' : '<span class="icon">◷</span>Hide';
+          });
+
+          for (const r of ["again", "hard", "good", "easy"]) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = r[0].toUpperCase() + r.slice(1);
+            b.addEventListener("click", () => reviewFlashcard(c.id, r));
+            actions.appendChild(b);
+          }
+
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "danger";
+          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          delBtn.addEventListener("click", () => deleteFlashcard(c.id));
+
+          actions.prepend(showBtn);
+          actions.appendChild(delBtn);
+          card.appendChild(actions);
+          flashcardList.appendChild(card);
+        }
+      }
+
+      async function addFlashcard() {
+        const front = fcFrontEl.value.trim();
+        const back = fcBackEl.value.trim();
+        if (!front || !back) return;
+
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("front", front);
+        form.append("back", back);
+        form.append("tags", fcTagsEl.value.trim());
+
+        const res = await fetch("/chat/flashcards/add", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+
+        fcFrontEl.value = "";
+        fcBackEl.value = "";
+        fcTagsEl.value = "";
+        await loadFlashcards();
+      }
+
+      async function reviewFlashcard(cardId, rating) {
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("card_id", cardId);
+        form.append("rating", rating);
+        const res = await fetch("/chat/flashcards/review", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        await loadFlashcards();
+      }
+
+      async function deleteFlashcard(cardId) {
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("card_id", cardId);
+        const res = await fetch("/chat/flashcards/delete", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        await loadFlashcards();
+      }
 
       sendBtn.addEventListener("click", sendStream);
       clearBtn.addEventListener("click", clearChat);
       logoutBtn.addEventListener("click", logout);
+      saveStudyBtn.addEventListener("click", saveLastStudy);
+      newChatBtn.addEventListener("click", startNewChat);
+      newChatNameEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          startNewChat();
+        }
+      });
+      refreshHistoryBtn.addEventListener("click", loadSessions);
+
+      showIngestBtn.addEventListener("click", () => openTool("toolIngest", "Ingest"));
+      showLibraryBtn.addEventListener("click", () => openTool("toolLibrary", "Study Library"));
+      showQuizBtn.addEventListener("click", () => openTool("toolQuiz", "Quiz Attempts"));
+      showFlashcardsBtn.addEventListener("click", () => openTool("toolFlashcards", "Flashcards"));
+      closeToolBtn.addEventListener("click", closeTool);
 
       ingestUrlBtn.addEventListener("click", ingestUrl);
       ingestFileBtn.addEventListener("click", ingestFile);
+      saveQuizAttemptBtn.addEventListener("click", saveQuizAttempt);
+      addFlashcardBtn.addEventListener("click", addFlashcard);
+      refreshFlashcardsBtn.addEventListener("click", loadFlashcards);
+      fcDueOnlyEl.addEventListener("change", loadFlashcards);
+
+      ownerEl.addEventListener("change", async () => {
+        owner();
+        const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(owner())}`);
+        if (res.ok) {
+          const data = await res.json();
+          renderHistory(data.history || []);
+        }
+      });
 
       msgEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -322,6 +1176,8 @@
       });
 
       scrollToBottom();
+      owner();
+      loadSessions();
     </script>
   </body>
 </html>

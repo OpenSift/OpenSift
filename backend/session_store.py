@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 DEFAULT_DIR = os.path.join(os.getcwd(), ".opensift_sessions")
 
@@ -58,3 +58,11 @@ def list_sessions(base_dir: str = DEFAULT_DIR) -> List[str]:
         if fn.endswith(".json"):
             names.append(fn[:-5])
     return sorted(names)
+
+
+def delete_session(owner: str, base_dir: str = DEFAULT_DIR) -> bool:
+    path = session_path(owner, base_dir)
+    if not os.path.exists(path):
+        return False
+    os.remove(path)
+    return True

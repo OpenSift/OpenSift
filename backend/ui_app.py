@@ -33,7 +33,16 @@ from app.providers import (
 )
 from app.vectordb import VectorDB
 
-from session_store import DEFAULT_DIR, list_sessions, load_session, save_session
+from session_store import DEFAULT_DIR as SESSION_DIR, delete_session, list_sessions, load_session, save_session
+from study_store import (
+    DEFAULT_DIR as STUDY_DIR,
+    add_item as add_study_item,
+    delete_item as delete_study_item,
+    get_item as get_study_item,
+    load_library as load_study_library,
+)
+from quiz_store import DEFAULT_DIR as QUIZ_DIR, add_attempt, delete_attempt, load_attempts
+from flashcard_store import DEFAULT_DIR as FLASHCARD_DIR, add_card, delete_card, due_cards, load_cards, review_card
 
 # -----------------------------------------------------------------------------
 # Setup
@@ -67,11 +76,23 @@ def _ndjson(obj: Dict[str, Any]) -> bytes:
 
 def _ensure_owner_loaded(owner: str) -> None:
     if owner not in CHAT_HISTORY or not CHAT_HISTORY[owner]:
-        CHAT_HISTORY[owner] = load_session(owner, DEFAULT_DIR)
+        CHAT_HISTORY[owner] = load_session(owner, SESSION_DIR)
 
 
 def _persist_owner(owner: str) -> None:
-    save_session(owner, CHAT_HISTORY[owner], DEFAULT_DIR)
+    save_session(owner, CHAT_HISTORY[owner], SESSION_DIR)
+
+
+def _last_generated_assistant(owner: str) -> Optional[Dict[str, Any]]:
+    _ensure_owner_loaded(owner)
+    for msg in reversed(CHAT_HISTORY[owner]):
+        if msg.get("role") != "assistant":
+            continue
+        if not isinstance(msg.get("text"), str) or not msg.get("text"):
+            continue
+        if isinstance(msg.get("mode"), str) and msg.get("mode"):
+            return msg
+    return None
 
 
 def _build_history_block(history: List[Dict[str, Any]], turns: int) -> str:
@@ -347,7 +368,10 @@ async def _print_startup_token():
     print("OpenSift Local Auth")
     print(f"Generated login token (valid until restart): {GEN_TOKEN}")
     print(f"Password set: {'YES' if _has_password() else 'NO'}")
-    print(f"Sessions dir: {DEFAULT_DIR}")
+    print(f"Sessions dir: {SESSION_DIR}")
+    print(f"Study library dir: {STUDY_DIR}")
+    print(f"Quiz attempts dir: {QUIZ_DIR}")
+    print(f"Flashcards dir: {FLASHCARD_DIR}")
     print("=" * 72 + "\n")
 
 
@@ -558,9 +582,21 @@ async def chat_clear(owner: str = Form("default")):
 # -----------------------------------------------------------------------------
 # Session endpoints
 # -----------------------------------------------------------------------------
+def _session_summaries() -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for owner in list_sessions(SESSION_DIR):
+        history = load_session(owner, SESSION_DIR)
+        last_ts = ""
+        if history:
+            last_ts = str(history[-1].get("ts") or "")
+        out.append({"owner": owner, "count": len(history), "last_ts": last_ts})
+    out.sort(key=lambda x: (x.get("last_ts") or "", x.get("owner") or ""), reverse=True)
+    return out
+
+
 @app.get("/chat/session/list")
 async def session_list():
-    return JSONResponse({"ok": True, "sessions": list_sessions(DEFAULT_DIR)})
+    return JSONResponse({"ok": True, "sessions": _session_summaries()})
 
 
 @app.get("/chat/session/export")
@@ -597,6 +633,180 @@ async def session_import(owner: str = Form("default"), payload: str = Form(...),
         CHAT_HISTORY[owner] = cleaned
     _persist_owner(owner)
     return JSONResponse({"ok": True, "owner": owner, "count": len(CHAT_HISTORY[owner])})
+
+
+@app.post("/chat/session/new")
+async def session_new(owner: str = Form("default")):
+    owner = (owner or "").strip() or "default"
+    CHAT_HISTORY[owner] = []
+    _persist_owner(owner)
+    return JSONResponse({"ok": True, "owner": owner})
+
+
+@app.post("/chat/session/delete")
+async def session_delete(owner: str = Form(...)):
+    owner = (owner or "").strip()
+    if not owner:
+        return JSONResponse({"ok": False, "error": "owner_required"}, status_code=400)
+    CHAT_HISTORY.pop(owner, None)
+    ok = delete_session(owner, SESSION_DIR)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner})
+
+
+# -----------------------------------------------------------------------------
+# Study library endpoints
+# -----------------------------------------------------------------------------
+@app.get("/chat/study/list")
+async def study_list(owner: str = "default"):
+    items = load_study_library(owner, STUDY_DIR)
+    summaries = [
+        {
+            "id": item.get("id"),
+            "title": item.get("title") or "Saved Study Item",
+            "mode": item.get("mode") or "",
+            "created_at": item.get("created_at") or "",
+            "preview": (item.get("text") or "")[:180],
+        }
+        for item in reversed(items)
+    ]
+    return JSONResponse({"ok": True, "owner": owner, "items": summaries})
+
+
+@app.get("/chat/study/get")
+async def study_get(owner: str = "default", item_id: str = ""):
+    item_id = (item_id or "").strip()
+    if not item_id:
+        return JSONResponse({"ok": False, "error": "item_id_required"}, status_code=400)
+    item = get_study_item(owner, item_id, STUDY_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/study/save-last")
+async def study_save_last(owner: str = Form("default"), title: str = Form("")):
+    msg = _last_generated_assistant(owner)
+    if not msg:
+        return JSONResponse({"ok": False, "error": "no_generated_answer_found"}, status_code=404)
+
+    mode = (msg.get("mode") or "").strip()
+    ts = msg.get("ts") or _now()
+    default_title = f"{(mode or 'study').replace('_', ' ').title()} - {ts[:10]}"
+    saved = add_study_item(
+        owner=owner,
+        title=title.strip() or default_title,
+        text=msg.get("text", ""),
+        mode=mode,
+        sources=msg.get("sources") if isinstance(msg.get("sources"), list) else [],
+        created_at=ts,
+        base_dir=STUDY_DIR,
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": saved})
+
+
+@app.post("/chat/study/delete")
+async def study_delete(owner: str = Form("default"), item_id: str = Form(...)):
+    ok = delete_study_item(owner, item_id, STUDY_DIR)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner, "item_id": item_id})
+
+
+# -----------------------------------------------------------------------------
+# Quiz attempt endpoints
+# -----------------------------------------------------------------------------
+@app.get("/chat/quiz/history")
+async def quiz_history(owner: str = "default"):
+    attempts = load_attempts(owner, QUIZ_DIR)
+    attempts_rev = list(reversed(attempts))
+
+    avg_pct = 0.0
+    if attempts:
+        avg_pct = round(sum(float(a.get("pct") or 0.0) for a in attempts) / len(attempts), 2)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "owner": owner,
+            "stats": {"count": len(attempts), "avg_pct": avg_pct},
+            "attempts": attempts_rev,
+        }
+    )
+
+
+@app.post("/chat/quiz/add")
+async def quiz_add(
+    owner: str = Form("default"),
+    title: str = Form(""),
+    score: int = Form(...),
+    total: int = Form(...),
+    notes: str = Form(""),
+):
+    if total <= 0:
+        return JSONResponse({"ok": False, "error": "total_must_be_positive"}, status_code=400)
+    if score < 0 or score > total:
+        return JSONResponse({"ok": False, "error": "score_must_be_between_0_and_total"}, status_code=400)
+
+    item = add_attempt(
+        owner=owner,
+        title=title,
+        score=score,
+        total=total,
+        notes=notes,
+        created_at=_now(),
+        base_dir=QUIZ_DIR,
+    )
+    return JSONResponse({"ok": True, "owner": owner, "attempt": item})
+
+
+@app.post("/chat/quiz/delete")
+async def quiz_delete(owner: str = Form("default"), attempt_id: str = Form(...)):
+    ok = delete_attempt(owner, attempt_id, QUIZ_DIR)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner, "attempt_id": attempt_id})
+
+
+# -----------------------------------------------------------------------------
+# Flashcard endpoints
+# -----------------------------------------------------------------------------
+@app.get("/chat/flashcards/list")
+async def flashcards_list(owner: str = "default", due_only: bool = False):
+    cards = due_cards(owner, FLASHCARD_DIR) if due_only else load_cards(owner, FLASHCARD_DIR)
+    cards_sorted = sorted(cards, key=lambda c: c.get("due_at") or "")
+    return JSONResponse({"ok": True, "owner": owner, "cards": cards_sorted})
+
+
+@app.post("/chat/flashcards/add")
+async def flashcards_add(owner: str = Form("default"), front: str = Form(...), back: str = Form(...), tags: str = Form("")):
+    front = (front or "").strip()
+    back = (back or "").strip()
+    if not front or not back:
+        return JSONResponse({"ok": False, "error": "front_and_back_required"}, status_code=400)
+
+    card = add_card(owner=owner, front=front, back=back, tags=tags, created_at=_now(), base_dir=FLASHCARD_DIR)
+    return JSONResponse({"ok": True, "owner": owner, "card": card})
+
+
+@app.post("/chat/flashcards/review")
+async def flashcards_review(owner: str = Form("default"), card_id: str = Form(...), rating: str = Form("good")):
+    if rating not in ("again", "hard", "good", "easy"):
+        return JSONResponse({"ok": False, "error": "invalid_rating"}, status_code=400)
+
+    card = review_card(owner=owner, card_id=card_id, rating=rating, reviewed_at=_now(), base_dir=FLASHCARD_DIR)
+    if not card:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner, "card": card})
+
+
+@app.post("/chat/flashcards/delete")
+async def flashcards_delete(owner: str = Form("default"), card_id: str = Form(...)):
+    ok = delete_card(owner, card_id, FLASHCARD_DIR)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner, "card_id": card_id})
 
 
 # -----------------------------------------------------------------------------
@@ -814,7 +1024,15 @@ async def chat_stream(
             )
             yield _ndjson({"type": "delta", "text": assistant_text})
 
-        assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": sources_payload}
+        assistant_msg = {
+            "role": "assistant",
+            "text": assistant_text,
+            "ts": _now(),
+            "sources": sources_payload,
+            "mode": mode,
+            "provider": provider,
+            "model": model,
+        }
         CHAT_HISTORY[owner].append(assistant_msg)
         _persist_owner(owner)
 

@@ -190,7 +190,7 @@ Claude Code | Setup token | Yes* | Recommended
 
 Claude API | API key | Yes | Anthropic
 
-OpenAI | API key | Yes | GPT-4.1-mini default
+OpenAI | API key | Yes | GPT-5.2 default
 
 * Claude Code currently uses chunk-streaming unless native token streaming is enabled.
 
