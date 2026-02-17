@@ -419,3 +419,4 @@ FodyWeavers.xsd
 .DS_Store
 .chroma/*
 .opensift_auth.json
+*.json

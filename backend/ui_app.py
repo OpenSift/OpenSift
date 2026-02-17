@@ -14,23 +14,19 @@ from typing import Any, AsyncGenerator, Deque, DefaultDict, Dict, List, Optional
 
 import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import StreamingResponse
 from starlette.status import HTTP_303_SEE_OTHER
 
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts
-from app.providers import (
-    build_prompt,
-    generate_with_claude,
-    generate_with_claude_code,
-    generate_with_openai,
-)
+from app.providers import build_prompt, generate_with_claude, generate_with_claude_code, generate_with_openai
 from app.vectordb import VectorDB
+
+from session_store import DEFAULT_DIR, list_sessions, load_session, save_session
 
 # -----------------------------------------------------------------------------
 # Setup
@@ -40,14 +36,18 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 
-app = FastAPI(title="OpenSift UI", version="0.5.2")
+app = FastAPI(title="OpenSift UI", version="0.6.0")
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 db = VectorDB()
 
+# History persisted per owner (loaded on demand)
 CHAT_HISTORY: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+# Default history settings for UI
+DEFAULT_HISTORY_TURNS = 10
 
 
 def _now() -> str:
@@ -58,8 +58,32 @@ def _ndjson(obj: Dict[str, Any]) -> bytes:
     return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _ensure_owner_loaded(owner: str) -> None:
+    if owner not in CHAT_HISTORY or not CHAT_HISTORY[owner]:
+        CHAT_HISTORY[owner] = load_session(owner, DEFAULT_DIR)
+
+
+def _persist_owner(owner: str) -> None:
+    save_session(owner, CHAT_HISTORY[owner], DEFAULT_DIR)
+
+
+def _build_history_block(history: List[Dict[str, Any]], turns: int) -> str:
+    h = history[-max(0, turns):]
+    lines = []
+    for m in h:
+        role = m.get("role")
+        text = (m.get("text") or "").strip()
+        if not text:
+            continue
+        if role == "user":
+            lines.append(f"User: {text}")
+        elif role == "assistant":
+            lines.append(f"Assistant: {text}")
+    return "\n".join(lines).strip()
+
+
 # -----------------------------------------------------------------------------
-# Localhost-only middleware (defense-in-depth)
+# Localhost-only middleware
 # -----------------------------------------------------------------------------
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
@@ -87,68 +111,50 @@ app.add_middleware(LocalhostOnlyMiddleware)
 # -----------------------------------------------------------------------------
 # Rate limiting (in-memory sliding window)
 # -----------------------------------------------------------------------------
-# Tweak these freely:
 RL_WINDOW_SECONDS = 60
+RL_CHAT_STREAM_PER_WINDOW = 30
+RL_CHAT_INGEST_PER_WINDOW = 12
+RL_CHAT_OTHER_PER_WINDOW = 30
+RL_LOGIN_PER_WINDOW = 12
 
-RL_CHAT_STREAM_PER_WINDOW = 30   # /chat/stream
-RL_CHAT_INGEST_PER_WINDOW = 12   # /chat/ingest/*
-RL_CHAT_OTHER_PER_WINDOW = 30    # other /chat/* POSTs
-RL_LOGIN_PER_WINDOW = 12         # /login POST and /set-password POST
-
-# Store timestamps for (client, bucket)
 _RL: Dict[Tuple[str, str], Deque[float]] = {}
-_RL_MAX_KEYS = 2048  # safety cap
+_RL_MAX_KEYS = 2048
 
 
 def _rl_bucket(path: str, method: str) -> Optional[Tuple[str, int]]:
-    """
-    Returns (bucket_name, limit) or None if not rate-limited.
-    """
     if method != "POST":
         return None
-
     if path == "/chat/stream":
         return ("chat_stream", RL_CHAT_STREAM_PER_WINDOW)
-
     if path.startswith("/chat/ingest/"):
         return ("chat_ingest", RL_CHAT_INGEST_PER_WINDOW)
-
     if path.startswith("/chat/"):
         return ("chat_other", RL_CHAT_OTHER_PER_WINDOW)
-
     if path in ("/login", "/set-password"):
         return ("auth", RL_LOGIN_PER_WINDOW)
-
     return None
 
 
-def _rl_prune_global(now: float) -> None:
-    # Prevent unbounded growth in case of pathological usage
+def _rl_prune_global() -> None:
     if len(_RL) <= _RL_MAX_KEYS:
         return
-    # Drop oldest buckets quickly (simple heuristic)
     keys = list(_RL.keys())[: len(_RL) - _RL_MAX_KEYS]
     for k in keys:
         _RL.pop(k, None)
 
 
 def _rl_check(client: str, bucket: str, limit: int, now: float) -> Tuple[bool, int, int]:
-    """
-    Returns (allowed, remaining, retry_after_seconds)
-    """
     key = (client, bucket)
     q = _RL.get(key)
     if q is None:
         q = deque()
         _RL[key] = q
 
-    # Evict old timestamps
     cutoff = now - RL_WINDOW_SECONDS
     while q and q[0] < cutoff:
         q.popleft()
 
     if len(q) >= limit:
-        # retry-after until the oldest request falls out of window
         retry_after = max(1, int((q[0] + RL_WINDOW_SECONDS) - now))
         return (False, 0, retry_after)
 
@@ -158,7 +164,6 @@ def _rl_check(client: str, bucket: str, limit: int, now: float) -> Tuple[bool, i
 
 
 def _is_api_path(path: str) -> bool:
-    # Used for JSON error responses
     return path.startswith("/chat/")
 
 
@@ -171,12 +176,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         bucket_name, limit = b
-
-        # Localhost-only means client will be loopback, but keep keying consistent anyway.
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
-        _rl_prune_global(now)
+        _rl_prune_global()
         allowed, remaining, retry_after = _rl_check(client_ip, bucket_name, limit, now)
 
         if not allowed:
@@ -188,12 +191,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "X-RateLimit-Bucket": bucket_name,
             }
             msg = f"Rate limit exceeded for {bucket_name}. Try again in {retry_after}s."
-
             if _is_api_path(path):
                 return JSONResponse({"ok": False, "error": "rate_limited", "message": msg}, status_code=429, headers=headers)
             return PlainTextResponse(msg, status_code=429, headers=headers)
 
-        # Add some helpful headers for debugging
         response = await call_next(request)
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
@@ -310,27 +311,19 @@ def _is_authenticated(request: Request) -> bool:
     return bool(cookie and _verify_session_cookie(cookie))
 
 
-EXEMPT_PATHS = {
-    "/login",
-    "/set-password",
-    "/health",
-}
+EXEMPT_PATHS = {"/login", "/set-password", "/health"}
 EXEMPT_PREFIXES = ("/static",)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-
         if path in EXEMPT_PATHS or any(path.startswith(p) for p in EXEMPT_PREFIXES):
             return await call_next(request)
-
         if _is_authenticated(request):
             return await call_next(request)
-
         if _is_api_path(path):
             return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
-
         return RedirectResponse(url="/login", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -343,7 +336,49 @@ async def _print_startup_token():
     print("OpenSift Local Auth")
     print(f"Generated login token (valid until restart): {GEN_TOKEN}")
     print(f"Password set: {'YES' if _has_password() else 'NO'}")
+    print(f"Sessions dir: {DEFAULT_DIR}")
     print("=" * 72 + "\n")
+
+
+# -----------------------------------------------------------------------------
+# Provider streaming helpers
+# -----------------------------------------------------------------------------
+async def _stream_openai(prompt: str, model: str) -> AsyncGenerator[str, None]:
+    from openai import OpenAI  # type: ignore
+
+    client = OpenAI()
+    stream = client.responses.stream(model=model, input=prompt)
+    with stream as s:
+        for event in s:
+            if getattr(event, "type", "") == "response.output_text.delta":
+                delta = getattr(event, "delta", "")
+                if delta:
+                    yield delta
+        _ = s.get_final_response()
+
+
+async def _stream_anthropic(prompt: str, model: str) -> AsyncGenerator[str, None]:
+    import anthropic  # type: ignore
+
+    client = anthropic.Anthropic()
+    with client.messages.stream(
+        model=model,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    ) as stream:
+        for text in stream.text_stream:
+            if text:
+                yield text
+
+
+def _run_generate(provider: str, prompt: str, model: str) -> str:
+    if provider == "openai":
+        return generate_with_openai(prompt, model=model or "DEFAULT_OPENAI_MODEL")
+    if provider == "claude":
+        return generate_with_claude(prompt, model=model or "DEFAULT_CLAUDE_MODEL")
+    if provider == "claude_code":
+        return generate_with_claude_code(prompt, model=model or None)
+    raise RuntimeError(f"Unknown provider: {provider}")
 
 
 # -----------------------------------------------------------------------------
@@ -358,22 +393,12 @@ async def health():
 async def login_page(request: Request):
     return templates.TemplateResponse(
         "login.html",
-        {
-            "request": request,
-            "mode": "login",
-            "has_password": _has_password(),
-            "token": GEN_TOKEN,
-            "error": None,
-        },
+        {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
 
 
 @app.post("/login")
-async def login_submit(
-    request: Request,
-    password: str = Form(""),
-    token: str = Form(""),
-):
+async def login_submit(request: Request, password: str = Form(""), token: str = Form("")):
     token = (token or "").strip()
     password = (password or "").strip()
 
@@ -386,25 +411,12 @@ async def login_submit(
     if not ok:
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "mode": "login",
-                "has_password": _has_password(),
-                "token": GEN_TOKEN,
-                "error": "Invalid token or password.",
-            },
+            {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Invalid token or password."},
             status_code=401,
         )
 
     resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
-    resp.set_cookie(
-        AUTH_COOKIE_NAME,
-        _make_session_cookie(),
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=AUTH_TTL_SECONDS,
-    )
+    resp.set_cookie(AUTH_COOKIE_NAME, _make_session_cookie(), httponly=True, samesite="lax", secure=False, max_age=AUTH_TTL_SECONDS)
     return resp
 
 
@@ -412,23 +424,12 @@ async def login_submit(
 async def set_password_page(request: Request):
     return templates.TemplateResponse(
         "login.html",
-        {
-            "request": request,
-            "mode": "set_password",
-            "has_password": _has_password(),
-            "token": GEN_TOKEN,
-            "error": None,
-        },
+        {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
 
 
 @app.post("/set-password")
-async def set_password_submit(
-    request: Request,
-    token: str = Form(...),
-    new_password: str = Form(...),
-    confirm_password: str = Form(...),
-):
+async def set_password_submit(request: Request, token: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...)):
     token = (token or "").strip()
     new_password = (new_password or "").strip()
     confirm_password = (confirm_password or "").strip()
@@ -436,53 +437,28 @@ async def set_password_submit(
     if not secrets.compare_digest(token, GEN_TOKEN):
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "mode": "set_password",
-                "has_password": _has_password(),
-                "token": GEN_TOKEN,
-                "error": "Invalid token. Copy/paste the generated token exactly.",
-            },
+            {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Invalid token. Copy/paste exactly."},
             status_code=401,
         )
 
     if len(new_password) < 8:
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "mode": "set_password",
-                "has_password": _has_password(),
-                "token": GEN_TOKEN,
-                "error": "Password must be at least 8 characters.",
-            },
+            {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Password must be at least 8 characters."},
             status_code=400,
         )
 
     if new_password != confirm_password:
         return templates.TemplateResponse(
             "login.html",
-            {
-                "request": request,
-                "mode": "set_password",
-                "has_password": _has_password(),
-                "token": GEN_TOKEN,
-                "error": "Passwords do not match.",
-            },
+            {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Passwords do not match."},
             status_code=400,
         )
 
     _set_password(new_password)
 
     resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
-    resp.set_cookie(
-        AUTH_COOKIE_NAME,
-        _make_session_cookie(),
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=AUTH_TTL_SECONDS,
-    )
+    resp.set_cookie(AUTH_COOKIE_NAME, _make_session_cookie(), httponly=True, samesite="lax", secure=False, max_age=AUTH_TTL_SECONDS)
     return resp
 
 
@@ -498,35 +474,74 @@ async def logout():
 # -----------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, owner: str = "default"):
-    return templates.TemplateResponse(
-        "chat.html",
-        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]},
-    )
+    _ensure_owner_loaded(owner)
+    return templates.TemplateResponse("chat.html", {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]})
 
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, owner: str = "default"):
-    return templates.TemplateResponse(
-        "chat.html",
-        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]},
-    )
+    _ensure_owner_loaded(owner)
+    return templates.TemplateResponse("chat.html", {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]})
 
 
 @app.post("/chat/clear")
 async def chat_clear(owner: str = Form("default")):
     CHAT_HISTORY[owner].clear()
+    _persist_owner(owner)
     return JSONResponse({"ok": True})
 
 
 # -----------------------------------------------------------------------------
-# Ingest endpoints (chat-first)
+# Session endpoints
+# -----------------------------------------------------------------------------
+@app.get("/chat/session/list")
+async def session_list():
+    return JSONResponse({"ok": True, "sessions": list_sessions(DEFAULT_DIR)})
+
+
+@app.get("/chat/session/export")
+async def session_export(owner: str = "default"):
+    _ensure_owner_loaded(owner)
+    return JSONResponse({"ok": True, "owner": owner, "history": CHAT_HISTORY[owner]})
+
+
+@app.post("/chat/session/import")
+async def session_import(owner: str = Form("default"), payload: str = Form(...), merge: bool = Form(False)):
+    """
+    payload: JSON array of chat messages
+    merge: if true, append; else replace
+    """
+    try:
+        data = json.loads(payload)
+        if not isinstance(data, list):
+            raise ValueError("payload must be a JSON list")
+        cleaned: List[Dict[str, Any]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            text = item.get("text")
+            if role in ("user", "assistant") and isinstance(text, str):
+                cleaned.append(item)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"invalid_payload: {e}"}, status_code=400)
+
+    _ensure_owner_loaded(owner)
+    if merge:
+        CHAT_HISTORY[owner].extend(cleaned)
+    else:
+        CHAT_HISTORY[owner] = cleaned
+    _persist_owner(owner)
+    return JSONResponse({"ok": True, "owner": owner, "count": len(CHAT_HISTORY[owner])})
+
+
+# -----------------------------------------------------------------------------
+# Ingest endpoints
 # -----------------------------------------------------------------------------
 @app.post("/chat/ingest/url")
-async def chat_ingest_url(
-    owner: str = Form("default"),
-    url: str = Form(...),
-    source_title: str = Form(""),
-):
+async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), source_title: str = Form("")):
+    _ensure_owner_loaded(owner)
+
     title, text = await fetch_url_text(url)
     source = source_title.strip() or title
     prefix = f"{owner}::{source}" if owner else source
@@ -534,34 +549,26 @@ async def chat_ingest_url(
     chunks = chunk_text(text, prefix=prefix)
     texts = [c.text for c in chunks]
     ids = [c.chunk_id for c in chunks]
-    metas = [
-        {"source": source, "kind": "url", "url": url, "owner": owner, "start": c.start, "end": c.end}
-        for c in chunks
-    ]
+    metas = [{"source": source, "kind": "url", "url": url, "owner": owner, "start": c.start, "end": c.end} for c in chunks]
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
 
-    assistant_msg = {
-        "role": "assistant",
-        "ts": _now(),
-        "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{url}",
-        "sources": [],
-    }
+    assistant_msg = {"role": "assistant", "ts": _now(), "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{url}", "sources": []}
     CHAT_HISTORY[owner].append(assistant_msg)
+    _persist_owner(owner)
 
     return JSONResponse({"ok": True, "assistant": assistant_msg})
 
 
 @app.post("/chat/ingest/file")
-async def chat_ingest_file(
-    owner: str = Form("default"),
-    file: UploadFile = File(...),
-):
+async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File(...)):
+    _ensure_owner_loaded(owner)
+
     data = await file.read()
     filename = file.filename or "upload"
-
     lower = filename.lower()
+
     if lower.endswith(".pdf"):
         kind = "pdf"
         text = extract_text_from_pdf(data)
@@ -569,23 +576,15 @@ async def chat_ingest_file(
         kind = "text"
         text = extract_text_from_txt(data)
     else:
-        assistant_msg = {
-            "role": "assistant",
-            "ts": _now(),
-            "text": "⚠️ Unsupported file type. Please upload: .pdf, .txt, or .md",
-            "sources": [],
-        }
+        assistant_msg = {"role": "assistant", "ts": _now(), "text": "⚠️ Unsupported file type. Please upload: .pdf, .txt, or .md", "sources": []}
         CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
         return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     if not text.strip():
-        assistant_msg = {
-            "role": "assistant",
-            "ts": _now(),
-            "text": f"⚠️ No text extracted from `{filename}`. (If it’s scanned, OCR isn’t enabled yet.)",
-            "sources": [],
-        }
+        assistant_msg = {"role": "assistant", "ts": _now(), "text": f"⚠️ No text extracted from `{filename}`. (If it’s scanned, OCR isn’t enabled yet.)", "sources": []}
         CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
         return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     prefix = f"{owner}::{filename}" if owner else filename
@@ -593,21 +592,14 @@ async def chat_ingest_file(
 
     texts = [c.text for c in chunks]
     ids = [c.chunk_id for c in chunks]
-    metas = [
-        {"source": filename, "kind": kind, "owner": owner, "start": c.start, "end": c.end}
-        for c in chunks
-    ]
+    metas = [{"source": filename, "kind": kind, "owner": owner, "start": c.start, "end": c.end} for c in chunks]
 
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
 
-    assistant_msg = {
-        "role": "assistant",
-        "ts": _now(),
-        "text": f"✅ Ingested {len(chunks)} chunks from file:\n{filename}",
-        "sources": [],
-    }
+    assistant_msg = {"role": "assistant", "ts": _now(), "text": f"✅ Ingested {len(chunks)} chunks from file:\n{filename}", "sources": []}
     CHAT_HISTORY[owner].append(assistant_msg)
+    _persist_owner(owner)
 
     return JSONResponse({"ok": True, "assistant": assistant_msg})
 
@@ -623,19 +615,29 @@ async def chat_stream(
     provider: str = Form("claude_code"),  # openai | claude | claude_code
     model: str = Form(""),
     k: int = Form(8),
+    history_turns: int = Form(DEFAULT_HISTORY_TURNS),
+    history_enabled: bool = Form(True),
 ):
+    _ensure_owner_loaded(owner)
+
     async def gen() -> AsyncGenerator[bytes, None]:
         user_msg = {"role": "user", "text": message, "ts": _now()}
         CHAT_HISTORY[owner].append(user_msg)
+        _persist_owner(owner)
 
         yield _ndjson({"type": "start", "ts": _now()})
         yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
 
+        # Retrieve
         try:
             q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([message])[0])
             res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k)))
         except Exception as e:
-            yield _ndjson({"type": "error", "message": f"Retrieval failed: {e}"})
+            err = f"Retrieval failed: {e}"
+            yield _ndjson({"type": "error", "message": err})
+            assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
+            CHAT_HISTORY[owner].append(assistant_msg)
+            _persist_owner(owner)
             yield _ndjson({"type": "done", "ts": _now()})
             return
 
@@ -649,18 +651,14 @@ async def chat_stream(
         for i in range(len(docs)):
             if owner and metas[i].get("owner") != owner:
                 continue
-            results.append(
-                {"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])}
-            )
+            results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
             passages.append({"text": docs[i], "meta": metas[i]})
 
         if not results:
-            assistant_text = (
-                "I couldn’t find anything in your ingested materials for that yet. "
-                "Try ingesting a PDF/URL first, or ask with different keywords."
-            )
+            assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
             assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": []}
             CHAT_HISTORY[owner].append(assistant_msg)
+            _persist_owner(owner)
 
             yield _ndjson({"type": "delta", "text": assistant_text})
             yield _ndjson({"type": "done", "ts": _now()})
@@ -668,57 +666,71 @@ async def chat_stream(
 
         sources_payload = [
             {
-                "source": r["meta"].get("source"),
-                "kind": r["meta"].get("kind"),
-                "url": r["meta"].get("url"),
+                "source": (r["meta"] or {}).get("source"),
+                "kind": (r["meta"] or {}).get("kind"),
+                "url": (r["meta"] or {}).get("url"),
                 "distance": r["distance"],
-                "preview": r["text"][:240],
+                "preview": (r["text"] or "")[:240],
             }
             for r in results[:5]
         ]
         yield _ndjson({"type": "sources", "sources": sources_payload})
 
-        prompt = build_prompt(mode=mode, query=message, passages=passages)
+        # History-aware prompt
+        convo = _build_history_block(CHAT_HISTORY[owner][:-1], int(history_turns)) if history_enabled else ""
+        query_for_prompt = f"Conversation so far:\n{convo}\n\nNew question:\n{message}" if convo else message
+        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages)
+
         yield _ndjson({"type": "status", "text": "Thinking…"})
 
         assistant_text = ""
-        gen_error: Optional[str] = None
 
-        def _run_generate() -> str:
-            if provider == "openai":
-                return generate_with_openai(prompt, model=model or "gpt-4.1-mini")
-            if provider == "claude":
-                return generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest")
-            if provider == "claude_code":
-                return generate_with_claude_code(prompt, model=model or None)
-            raise RuntimeError(f"Unknown provider: {provider}")
-
+        # True streaming where possible, fallback otherwise
         try:
-            assistant_text = await anyio.to_thread.run_sync(_run_generate)
+            if provider == "openai":
+                m = model or "DEFAULT_OPENAI_MODEL"
+                try:
+                    async for delta in _stream_openai(prompt, m):
+                        assistant_text += delta
+                        yield _ndjson({"type": "delta", "text": delta})
+                except Exception:
+                    text = await anyio.to_thread.run_sync(lambda: _run_generate(provider, prompt, model))
+                    assistant_text = text
+                    yield _ndjson({"type": "delta", "text": assistant_text})
+
+            elif provider == "claude":
+                m = model or "DEFAULT_CLAUDE_MODEL"
+                try:
+                    async for delta in _stream_anthropic(prompt, m):
+                        assistant_text += delta
+                        yield _ndjson({"type": "delta", "text": delta})
+                except Exception:
+                    text = await anyio.to_thread.run_sync(lambda: _run_generate(provider, prompt, model))
+                    assistant_text = text
+                    yield _ndjson({"type": "delta", "text": assistant_text})
+
+            else:
+                # claude_code or others: fallback
+                text = await anyio.to_thread.run_sync(lambda: _run_generate(provider, prompt, model))
+                assistant_text = text
+                # chunk stream (UI will show it as streaming)
+                for i in range(0, len(assistant_text), 80):
+                    yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
+                    await asyncio.sleep(0.01)
+
         except Exception as e:
-            gen_error = str(e)
-
-        if gen_error:
-            top = results[:3]
-            bullets = "\n".join([f"- {r['text'][:240].strip()}…" for r in top])
+            bullets = "\n".join([f"- {(r['text'] or '')[:240].strip()}…" for r in results[:3]])
             assistant_text = (
-                "I can’t generate right now (provider/auth issue), but here are the most relevant notes I found:\n\n"
+                f"⚠️ Generation failed ({e}).\n\n"
+                "Here are the most relevant passages I found:\n\n"
                 f"{bullets}\n\n"
-                "If you set a provider (OpenAI/Claude/Claude Code), I can turn this into a study guide/quiz."
+                "If you set a provider (OpenAI/Claude/Claude Code), I can generate study guides/quizzes."
             )
+            yield _ndjson({"type": "delta", "text": assistant_text})
 
-        chunk_size = 60
-        for i in range(0, len(assistant_text), chunk_size):
-            yield _ndjson({"type": "delta", "text": assistant_text[i : i + chunk_size]})
-            await asyncio.sleep(0.01)
-
-        assistant_msg = {
-            "role": "assistant",
-            "text": assistant_text,
-            "ts": _now(),
-            "sources": sources_payload,
-        }
+        assistant_msg = {"role": "assistant", "text": assistant_text, "ts": _now(), "sources": sources_payload}
         CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
 
         yield _ndjson({"type": "done", "ts": _now()})
 

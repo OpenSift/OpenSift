@@ -6,10 +6,8 @@ import sys
 
 
 def run_ui(host: str, port: int, reload: bool) -> None:
-    # Import here so CLI mode doesn't require uvicorn installed
     import uvicorn  # type: ignore
 
-    # ui_app.py should be in the same folder (backend/)
     uvicorn.run(
         "ui_app:app",
         host=host,
@@ -20,10 +18,8 @@ def run_ui(host: str, port: int, reload: bool) -> None:
 
 
 def run_terminal(argv: list[str]) -> None:
-    # Run terminal chat module
     from cli_chat import main as cli_main  # type: ignore
 
-    # Forward remaining args to CLI main by temporarily replacing sys.argv
     old_argv = sys.argv[:]
     try:
         sys.argv = ["cli_chat.py", *argv]
@@ -48,11 +44,12 @@ def main() -> None:
     p_term.add_argument("--model", default="", help="Model override (optional)")
     p_term.add_argument("--k", type=int, default=8, help="Top-k retrieval")
     p_term.add_argument("--wrap", type=int, default=100, help="Wrap width")
+    p_term.add_argument("--history-turns", type=int, default=10, help="How many messages to include as history")
+    p_term.add_argument("--no-stream", action="store_true", help="Disable streaming output")
+    p_term.add_argument("--no-sources", action="store_true", help="Disable sources printing")
 
     args, extras = parser.parse_known_args()
 
-    # Ensure working dir is backend/ so relative imports/templates work consistently.
-    # If user runs from elsewhere, this helps.
     this_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(this_dir)
 
@@ -73,7 +70,14 @@ def main() -> None:
             str(args.k),
             "--wrap",
             str(args.wrap),
+            "--history-turns",
+            str(args.history_turns),
         ]
+        if args.no_stream:
+            forwarded.append("--no-stream")
+        if args.no_sources:
+            forwarded.append("--no-sources")
+
         run_terminal(forwarded + extras)
 
 
