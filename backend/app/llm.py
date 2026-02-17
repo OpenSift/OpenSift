@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import List, Optional
 
 from .settings import settings
@@ -25,18 +26,24 @@ def _get_local_model() -> SentenceTransformer:
     return _local_model
 
 
+def _openai_enabled() -> bool:
+    # Allow either settings value OR environment variable.
+    return bool(settings.openai_api_key) or bool(os.environ.get("OPENAI_API_KEY"))
+
+
 def _openai_client():
-    if not settings.openai_api_key:
+    if not _openai_enabled():
         return None
     if OpenAI is None:
-        raise RuntimeError("openai package not available, but OPENAI_API_KEY is set")
-    return OpenAI(api_key=settings.openai_api_key)
+        raise RuntimeError("openai package not available, but OpenAI embeddings are enabled")
+    # OpenAI() will read OPENAI_API_KEY from env automatically.
+    return OpenAI()
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
     """
     Embedding strategy:
-    - If OPENAI_API_KEY is set: use OpenAI embeddings (higher quality + consistency)
+    - If OpenAI embeddings are enabled: use OpenAI embeddings
     - Else: use local sentence-transformers embeddings (no keys required)
     """
     client = _openai_client()

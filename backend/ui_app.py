@@ -23,7 +23,14 @@ from starlette.status import HTTP_303_SEE_OTHER
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts
-from app.providers import build_prompt, generate_with_claude, generate_with_claude_code, generate_with_openai
+from app.providers import (
+    DEFAULT_CLAUDE_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    build_prompt,
+    generate_with_claude,
+    generate_with_claude_code,
+    generate_with_openai,
+)
 from app.vectordb import VectorDB
 
 from session_store import DEFAULT_DIR, list_sessions, load_session, save_session
@@ -192,7 +199,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             }
             msg = f"Rate limit exceeded for {bucket_name}. Try again in {retry_after}s."
             if _is_api_path(path):
-                return JSONResponse({"ok": False, "error": "rate_limited", "message": msg}, status_code=429, headers=headers)
+                return JSONResponse(
+                    {"ok": False, "error": "rate_limited", "message": msg},
+                    status_code=429,
+                    headers=headers,
+                )
             return PlainTextResponse(msg, status_code=429, headers=headers)
 
         response = await call_next(request)
@@ -372,12 +383,22 @@ async def _stream_anthropic(prompt: str, model: str) -> AsyncGenerator[str, None
 
 
 def _run_generate(provider: str, prompt: str, model: str) -> str:
+    provider = (provider or "").strip().lower()
+    model = (model or "").strip()
+
     if provider == "openai":
-        return generate_with_openai(prompt, model=model or "DEFAULT_OPENAI_MODEL")
+        m = model or DEFAULT_OPENAI_MODEL
+        return generate_with_openai(prompt, model=m)
+
     if provider == "claude":
-        return generate_with_claude(prompt, model=model or "DEFAULT_CLAUDE_MODEL")
+        m = model or DEFAULT_CLAUDE_MODEL
+        return generate_with_claude(prompt, model=m)
+
     if provider == "claude_code":
-        return generate_with_claude_code(prompt, model=model or None)
+        # Prefer explicit model; otherwise default to always-latest Sonnet 4.5 alias.
+        m = model or DEFAULT_CLAUDE_MODEL
+        return generate_with_claude_code(prompt, model=m)
+
     raise RuntimeError(f"Unknown provider: {provider}")
 
 
@@ -411,12 +432,25 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
     if not ok:
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Invalid token or password."},
+            {
+                "request": request,
+                "mode": "login",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Invalid token or password.",
+            },
             status_code=401,
         )
 
     resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
-    resp.set_cookie(AUTH_COOKIE_NAME, _make_session_cookie(), httponly=True, samesite="lax", secure=False, max_age=AUTH_TTL_SECONDS)
+    resp.set_cookie(
+        AUTH_COOKIE_NAME,
+        _make_session_cookie(),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=AUTH_TTL_SECONDS,
+    )
     return resp
 
 
@@ -429,7 +463,12 @@ async def set_password_page(request: Request):
 
 
 @app.post("/set-password")
-async def set_password_submit(request: Request, token: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...)):
+async def set_password_submit(
+    request: Request,
+    token: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
     token = (token or "").strip()
     new_password = (new_password or "").strip()
     confirm_password = (confirm_password or "").strip()
@@ -437,28 +476,53 @@ async def set_password_submit(request: Request, token: str = Form(...), new_pass
     if not secrets.compare_digest(token, GEN_TOKEN):
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Invalid token. Copy/paste exactly."},
+            {
+                "request": request,
+                "mode": "set_password",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Invalid token. Copy/paste exactly.",
+            },
             status_code=401,
         )
 
     if len(new_password) < 8:
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Password must be at least 8 characters."},
+            {
+                "request": request,
+                "mode": "set_password",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Password must be at least 8 characters.",
+            },
             status_code=400,
         )
 
     if new_password != confirm_password:
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": "Passwords do not match."},
+            {
+                "request": request,
+                "mode": "set_password",
+                "has_password": _has_password(),
+                "token": GEN_TOKEN,
+                "error": "Passwords do not match.",
+            },
             status_code=400,
         )
 
     _set_password(new_password)
 
     resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
-    resp.set_cookie(AUTH_COOKIE_NAME, _make_session_cookie(), httponly=True, samesite="lax", secure=False, max_age=AUTH_TTL_SECONDS)
+    resp.set_cookie(
+        AUTH_COOKIE_NAME,
+        _make_session_cookie(),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=AUTH_TTL_SECONDS,
+    )
     return resp
 
 
@@ -554,7 +618,12 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
 
-    assistant_msg = {"role": "assistant", "ts": _now(), "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{url}", "sources": []}
+    assistant_msg = {
+        "role": "assistant",
+        "ts": _now(),
+        "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{url}",
+        "sources": [],
+    }
     CHAT_HISTORY[owner].append(assistant_msg)
     _persist_owner(owner)
 
@@ -576,13 +645,23 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
         kind = "text"
         text = extract_text_from_txt(data)
     else:
-        assistant_msg = {"role": "assistant", "ts": _now(), "text": "⚠️ Unsupported file type. Please upload: .pdf, .txt, or .md", "sources": []}
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": "⚠️ Unsupported file type. Please upload: .pdf, .txt, or .md",
+            "sources": [],
+        }
         CHAT_HISTORY[owner].append(assistant_msg)
         _persist_owner(owner)
         return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     if not text.strip():
-        assistant_msg = {"role": "assistant", "ts": _now(), "text": f"⚠️ No text extracted from `{filename}`. (If it’s scanned, OCR isn’t enabled yet.)", "sources": []}
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": f"⚠️ No text extracted from `{filename}`. (If it’s scanned, OCR isn’t enabled yet.)",
+            "sources": [],
+        }
         CHAT_HISTORY[owner].append(assistant_msg)
         _persist_owner(owner)
         return JSONResponse({"ok": False, "assistant": assistant_msg})
@@ -597,7 +676,12 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
     embs = embed_texts(texts)
     db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
 
-    assistant_msg = {"role": "assistant", "ts": _now(), "text": f"✅ Ingested {len(chunks)} chunks from file:\n{filename}", "sources": []}
+    assistant_msg = {
+        "role": "assistant",
+        "ts": _now(),
+        "text": f"✅ Ingested {len(chunks)} chunks from file:\n{filename}",
+        "sources": [],
+    }
     CHAT_HISTORY[owner].append(assistant_msg)
     _persist_owner(owner)
 
@@ -687,33 +771,35 @@ async def chat_stream(
 
         # True streaming where possible, fallback otherwise
         try:
-            if provider == "openai":
-                m = model or "DEFAULT_OPENAI_MODEL"
+            p = (provider or "").strip().lower()
+
+            if p == "openai":
+                m = (model or DEFAULT_OPENAI_MODEL).strip()
                 try:
                     async for delta in _stream_openai(prompt, m):
                         assistant_text += delta
                         yield _ndjson({"type": "delta", "text": delta})
                 except Exception:
-                    text = await anyio.to_thread.run_sync(lambda: _run_generate(provider, prompt, model))
+                    text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
                     assistant_text = text
                     yield _ndjson({"type": "delta", "text": assistant_text})
 
-            elif provider == "claude":
-                m = model or "DEFAULT_CLAUDE_MODEL"
+            elif p == "claude":
+                m = (model or DEFAULT_CLAUDE_MODEL).strip()
                 try:
                     async for delta in _stream_anthropic(prompt, m):
                         assistant_text += delta
                         yield _ndjson({"type": "delta", "text": delta})
                 except Exception:
-                    text = await anyio.to_thread.run_sync(lambda: _run_generate(provider, prompt, model))
+                    text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
                     assistant_text = text
                     yield _ndjson({"type": "delta", "text": assistant_text})
 
             else:
-                # claude_code or others: fallback
-                text = await anyio.to_thread.run_sync(lambda: _run_generate(provider, prompt, model))
+                # claude_code or others: fallback (UI will show chunked streaming)
+                m = (model or DEFAULT_CLAUDE_MODEL).strip()
+                text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
                 assistant_text = text
-                # chunk stream (UI will show it as streaming)
                 for i in range(0, len(assistant_text), 80):
                     yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
                     await asyncio.sleep(0.01)
