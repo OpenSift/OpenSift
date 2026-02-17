@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import signal
 import subprocess
@@ -127,18 +128,83 @@ def _env_or_file(env_data: Dict[str, str], key: str) -> str:
     return os.environ.get(key, "").strip() or env_data.get(key, "").strip()
 
 
+def _codex_auth_file_token() -> str:
+    path = os.environ.get("OPENSIFT_CODEX_AUTH_PATH", "").strip() or os.path.join(
+        os.path.expanduser("~"),
+        ".codex",
+        "auth.json",
+    )
+    if not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return ""
+
+    preferred_keys = (
+        "chatgpt_codex_oauth_token",
+        "codex_oauth_token",
+        "oauth_token",
+        "access_token",
+        "id_token",
+        "token",
+    )
+
+    def find(obj) -> str:
+        if isinstance(obj, dict):
+            lower = {str(k).lower(): v for k, v in obj.items()}
+            for k in preferred_keys:
+                v = lower.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+            for v in obj.values():
+                s = find(v)
+                if s:
+                    return s
+            return ""
+        if isinstance(obj, list):
+            for v in obj:
+                s = find(v)
+                if s:
+                    return s
+            return ""
+        return ""
+
+    return find(data)
+
+
 def _gateway_provider_summary(env_data: Dict[str, str]) -> List[str]:
     out: List[str] = []
     openai_key = _env_or_file(env_data, "OPENAI_API_KEY")
     anthropic_key = _env_or_file(env_data, "ANTHROPIC_API_KEY")
     claude_token = _env_or_file(env_data, "CLAUDE_CODE_OAUTH_TOKEN")
+    codex_token = _env_or_file(env_data, "CHATGPT_CODEX_OAUTH_TOKEN") or _codex_auth_file_token()
     claude_cmd = _env_or_file(env_data, "OPENSIFT_CLAUDE_CODE_CMD") or "claude"
+    codex_cmd = _env_or_file(env_data, "OPENSIFT_CODEX_CMD") or "codex"
 
     out.append(f"OpenAI API key: {'configured' if openai_key else 'not set'}")
     out.append(f"Anthropic API key: {'configured' if anthropic_key else 'not set'}")
     out.append(f"Claude Code token: {'configured' if claude_token else 'not set'}")
+    out.append(f"ChatGPT Codex OAuth token: {'configured' if codex_token else 'not set'}")
     out.append(f"Claude Code command: {claude_cmd}")
+    out.append(f"Codex command: {codex_cmd}")
     return out
+
+
+def _cmd_looks_like_wrong_codex(cmd: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [cmd, "--help"],
+            text=True,
+            capture_output=True,
+            timeout=4,
+            env=os.environ.copy(),
+        )
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+        return ("render your codex" in out) or ("codex build" in out and "template" in out)
+    except Exception:
+        return False
 
 
 def _wait_for_http_health(url: str, timeout_s: float) -> bool:
@@ -268,13 +334,21 @@ def run_setup() -> None:
         ("OPENAI_API_KEY", "OpenAI API key (optional)"),
         ("ANTHROPIC_API_KEY", "Anthropic API key (optional)"),
         ("CLAUDE_CODE_OAUTH_TOKEN", "Claude Code OAuth token (optional)"),
+        ("CHATGPT_CODEX_OAUTH_TOKEN", "ChatGPT Codex OAuth token (optional)"),
         ("OPENSIFT_CLAUDE_CODE_CMD", "Claude Code command (default: claude)"),
         ("OPENSIFT_CLAUDE_CODE_ARGS", "Claude Code extra args (optional)"),
+        ("OPENSIFT_CODEX_CMD", "Codex command (default: codex)"),
+        ("OPENSIFT_CODEX_ARGS", "Codex extra args (optional)"),
     ]
 
     updated = dict(env_data)
     for key, label in key_specs:
-        secret = key not in ("OPENSIFT_CLAUDE_CODE_CMD", "OPENSIFT_CLAUDE_CODE_ARGS")
+        secret = key not in (
+            "OPENSIFT_CLAUDE_CODE_CMD",
+            "OPENSIFT_CLAUDE_CODE_ARGS",
+            "OPENSIFT_CODEX_CMD",
+            "OPENSIFT_CODEX_ARGS",
+        )
         current = updated.get(key, "")
         value = _prompt_value(label, current=current, secret=secret)
         if value is None:
@@ -288,12 +362,19 @@ def run_setup() -> None:
     _apply_env(updated)
 
     print(f"\nSaved environment config: {env_path}")
+    codex_cmd = (updated.get("OPENSIFT_CODEX_CMD") or "codex").strip()
+    if updated.get("CHATGPT_CODEX_OAUTH_TOKEN") and _cmd_looks_like_wrong_codex(codex_cmd):
+        print("\n⚠️ Codex command validation warning:")
+        print(f"   '{codex_cmd}' appears to be the unrelated npm 'codex' package (site generator).")
+        print("   Install the ChatGPT Codex CLI and set OPENSIFT_CODEX_CMD to the correct executable.")
+
     print("\nLaunch mode options:")
     print("  - ui       : Web chatbot (FastAPI UI)")
     print("  - terminal : Terminal chatbot")
     print("  - gateway  : Supervised gateway (UI + optional MCP)")
     print("  - both     : Start UI + terminal together")
     print("  - none     : Exit setup without launching")
+    print("\nNote: ChatGPT Codex OAuth is captured for local Codex CLI integrations.")
 
     mode = _prompt_choice("Choose launch mode", ["ui", "terminal", "gateway", "both", "none"], default="gateway")
     if mode == "none":
@@ -313,12 +394,14 @@ def run_setup() -> None:
         provider_default = "claude"
     elif updated.get("OPENAI_API_KEY"):
         provider_default = "openai"
+    elif (updated.get("CHATGPT_CODEX_OAUTH_TOKEN") or _codex_auth_file_token()):
+        provider_default = "codex"
     elif updated.get("CLAUDE_CODE_OAUTH_TOKEN"):
         provider_default = "claude_code"
 
     provider = _prompt_choice(
         "Terminal provider",
-        ["openai", "claude", "claude_code"],
+        ["openai", "claude", "claude_code", "codex"],
         default=provider_default,
     )
     term_args = _terminal_args_for_provider(provider)
@@ -350,7 +433,7 @@ def main() -> None:
     p_term = sub.add_parser("terminal", help="Run terminal chatbot")
     p_term.add_argument("--owner", default="default", help="Owner/namespace")
     p_term.add_argument("--mode", default="study_guide", help="Mode")
-    p_term.add_argument("--provider", default="claude_code", choices=["openai", "claude", "claude_code"])
+    p_term.add_argument("--provider", default="claude_code", choices=["openai", "claude", "claude_code", "codex"])
     p_term.add_argument("--model", default="", help="Model override (optional)")
     p_term.add_argument("--k", type=int, default=8, help="Top-k retrieval")
     p_term.add_argument("--wrap", type=int, default=100, help="Wrap width")

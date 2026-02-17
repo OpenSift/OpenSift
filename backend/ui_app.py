@@ -28,12 +28,15 @@ from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_t
 from app.llm import embed_texts
 from app.logging_utils import configure_logging
 from app.providers import (
+    codex_auth_detected,
     DEFAULT_CLAUDE_MODEL,
     DEFAULT_OPENAI_MODEL,
     build_prompt,
     generate_with_claude,
     generate_with_claude_code,
+    generate_with_codex,
     generate_with_openai,
+    stream_with_codex,
 )
 from app.soul import get_global_style, set_global_style
 from app.vectordb import VectorDB
@@ -457,6 +460,12 @@ async def _stream_anthropic(prompt: str, model: str) -> AsyncGenerator[str, None
                 yield text
 
 
+async def _stream_codex(prompt: str, model: str) -> AsyncGenerator[str, None]:
+    async for text in stream_with_codex(prompt, model=model):
+        if text:
+            yield text
+
+
 def _run_generate(provider: str, prompt: str, model: str) -> str:
     provider = (provider or "").strip().lower()
     model = (model or "").strip()
@@ -474,6 +483,10 @@ def _run_generate(provider: str, prompt: str, model: str) -> str:
         m = model or DEFAULT_CLAUDE_MODEL
         return generate_with_claude_code(prompt, model=m)
 
+    if provider == "codex":
+        m = model or DEFAULT_OPENAI_MODEL
+        return generate_with_codex(prompt, model=m)
+
     raise RuntimeError(f"Unknown provider: {provider}")
 
 
@@ -482,7 +495,15 @@ def _run_generate(provider: str, prompt: str, model: str) -> str:
 # -----------------------------------------------------------------------------
 @app.get("/health")
 async def health():
-    return JSONResponse({"ok": True, "time": _now()})
+    return JSONResponse(
+        {
+            "ok": True,
+            "time": _now(),
+            "diagnostics": {
+                "codex_auth_detected": codex_auth_detected(),
+            },
+        }
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -1077,7 +1098,7 @@ async def chat_stream(
     owner: str = Form("default"),
     message: str = Form(...),
     mode: str = Form("study_guide"),
-    provider: str = Form("claude_code"),  # openai | claude | claude_code
+    provider: str = Form("claude_code"),  # openai | claude | claude_code | codex
     model: str = Form(""),
     k: int = Form(8),
     history_turns: int = Form(DEFAULT_HISTORY_TURNS),
@@ -1226,6 +1247,17 @@ async def chat_stream(
                     assistant_text = text
                     yield _ndjson({"type": "delta", "text": assistant_text})
 
+            elif p == "codex":
+                m = (model or DEFAULT_OPENAI_MODEL).strip()
+                try:
+                    async for delta in _stream_codex(prompt, m):
+                        assistant_text += delta
+                        yield _ndjson({"type": "delta", "text": delta})
+                except Exception:
+                    text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
+                    assistant_text = text
+                    yield _ndjson({"type": "delta", "text": assistant_text})
+
             else:
                 # claude_code or others: fallback (UI will show chunked streaming)
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
@@ -1242,7 +1274,7 @@ async def chat_stream(
                 f"⚠️ Generation failed ({e}).\n\n"
                 "Here are the most relevant passages I found:\n\n"
                 f"{bullets}\n\n"
-                "If you set a provider (OpenAI/Claude/Claude Code), I can generate study guides/quizzes."
+                "If you set a provider (OpenAI/Claude/Claude Code/Codex), I can generate study guides/quizzes."
             )
             yield _ndjson({"type": "delta", "text": assistant_text})
 

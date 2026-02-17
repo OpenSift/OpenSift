@@ -1,5 +1,65 @@
 # OpenSift Release Notes
 
+## v1.1.2-alpha (Proposed)
+Release date: 2026-02-17
+
+This patch release strengthens provider runtime reliability and adds deeper ChatGPT Codex integration, including auth auto-discovery, non-interactive execution, diagnostics, and UI controls.
+
+### Highlights
+- Added end-to-end ChatGPT Codex provider support across UI, terminal, MCP, and setup wizard.
+- Added Codex auth auto-discovery from `~/.codex/auth.json`.
+- Switched Codex execution to non-interactive `codex exec` to avoid TTY-only failures.
+- Added UI wellness reminder toggles with persistent global settings.
+
+### Added
+- Setup wizard support for Codex credentials/config:
+  - `CHATGPT_CODEX_OAUTH_TOKEN`
+  - `OPENSIFT_CODEX_CMD`
+  - `OPENSIFT_CODEX_ARGS`
+- Runtime Codex provider support in:
+  - `backend/ui_app.py`
+  - `backend/cli_chat.py`
+  - `backend/mcp_server.py`
+- Native Codex streaming support via shared provider utility:
+  - `stream_with_codex(...)`
+- Health diagnostics flag:
+  - `GET /health -> diagnostics.codex_auth_detected` (boolean, no secret exposure)
+- Wellness settings API + UI toggles:
+  - `GET /chat/wellness`
+  - `POST /chat/wellness/set`
+  - Sidebar controls for enable/disable + cadence tuning
+
+### Changed
+- Codex provider invocation is now non-interactive and consistent:
+  - `codex exec ... -` instead of interactive TTY path
+- Codex auth resolution order:
+  1. `CHATGPT_CODEX_OAUTH_TOKEN` env var
+  2. `~/.codex/auth.json` (override with `OPENSIFT_CODEX_AUTH_PATH`)
+- Setup/default provider selection now recognizes Codex auth availability from both env and auth file.
+- Gateway/provider summaries now report Codex auth readiness more accurately.
+
+### Fixed
+- Resolved common Codex runtime failure:
+  - `Error: stdin is not a terminal`
+- Added detection and clearer errors when `OPENSIFT_CODEX_CMD` points to the unrelated npm `codex` site-generator package.
+- Improved provider failure messaging to make Codex misconfiguration easier to diagnose.
+
+### Configuration
+New or emphasized variables for this patch:
+- `CHATGPT_CODEX_OAUTH_TOKEN`
+- `OPENSIFT_CODEX_CMD`
+- `OPENSIFT_CODEX_ARGS`
+- `OPENSIFT_CODEX_AUTH_PATH` (default: `~/.codex/auth.json`)
+- `OPENSIFT_BREAK_REMINDERS_ENABLED`
+- `OPENSIFT_BREAK_REMINDER_EVERY_USER_MSGS`
+- `OPENSIFT_BREAK_REMINDER_MIN_MINUTES`
+
+### Notes
+- Codex support now follows the same shared provider architecture used across OpenSift runtime surfaces.
+- Diagnostics intentionally expose only auth presence (`true/false`) and never token values.
+
+---
+
 ## v1.1.1-alpha (Proposed)
 Release date: 2026-02-17
 

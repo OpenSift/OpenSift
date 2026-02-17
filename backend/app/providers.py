@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import shlex
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -134,21 +137,125 @@ def _which_cmd(cmd: str) -> Optional[str]:
     return shutil.which(cmd)
 
 
-def _run_subprocess(args: List[str], stdin_text: str, timeout_s: int = 180) -> str:
+def _looks_like_wrong_codex_cli(cmd: str) -> bool:
+    """
+    Detect the unrelated legacy/npm `codex` package ("Render your codex.")
+    which does not support ChatGPT Codex login/generation flows.
+    """
+    exe = _which_cmd(cmd)
+    if not exe:
+        return False
+    try:
+        proc = subprocess.run(
+            [exe, "--help"],
+            text=True,
+            capture_output=True,
+            timeout=4,
+            env=os.environ.copy(),
+        )
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+        return ("render your codex" in out) or ("codex build" in out and "template" in out)
+    except Exception:
+        return False
+
+
+def _parse_cli_args(raw: str) -> List[str]:
+    try:
+        return shlex.split(raw or "")
+    except Exception:
+        return [a for a in (raw or "").split(" ") if a]
+
+
+def _run_subprocess(args: List[str], stdin_text: str, timeout_s: int = 180, env: Optional[Dict[str, str]] = None) -> str:
     proc = subprocess.run(
         args,
         input=stdin_text,
         text=True,
         capture_output=True,
         timeout=timeout_s,
-        env=os.environ.copy(),
+        env=(env or os.environ.copy()),
     )
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip()
         stdout = (proc.stdout or "").strip()
         detail = stderr or stdout or f"exit_code={proc.returncode}"
-        raise RuntimeError(f"Claude Code command failed: {detail}")
+        raise RuntimeError(f"CLI command failed: {detail}")
     return (proc.stdout or "").strip()
+
+
+def _coerce_str(v: Any) -> str:
+    return v.strip() if isinstance(v, str) else ""
+
+
+def _find_token_in_obj(obj: Any) -> str:
+    """
+    Conservative token extraction from unknown auth.json shape.
+    Prefers explicit token-like keys first.
+    """
+    preferred_keys = (
+        "chatgpt_codex_oauth_token",
+        "codex_oauth_token",
+        "oauth_token",
+        "access_token",
+        "id_token",
+        "token",
+    )
+
+    if isinstance(obj, dict):
+        lower_map = {str(k).lower(): v for k, v in obj.items()}
+        for k in preferred_keys:
+            v = lower_map.get(k)
+            s = _coerce_str(v)
+            if s:
+                return s
+        for v in obj.values():
+            s = _find_token_in_obj(v)
+            if s:
+                return s
+        return ""
+
+    if isinstance(obj, list):
+        for v in obj:
+            s = _find_token_in_obj(v)
+            if s:
+                return s
+        return ""
+
+    return ""
+
+
+def _load_codex_oauth_token() -> str:
+    # 1) explicit env always wins
+    env_token = _coerce_str(os.environ.get("CHATGPT_CODEX_OAUTH_TOKEN", ""))
+    if env_token:
+        return env_token
+
+    # 2) auto-discover from Codex auth file
+    auth_path = _coerce_str(os.environ.get("OPENSIFT_CODEX_AUTH_PATH", "")) or os.path.join(
+        os.path.expanduser("~"),
+        ".codex",
+        "auth.json",
+    )
+    if not os.path.exists(auth_path):
+        return ""
+    try:
+        with open(auth_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return _find_token_in_obj(data)
+    except Exception:
+        return ""
+
+
+def _codex_subprocess_env() -> Dict[str, str]:
+    env = os.environ.copy()
+    token = _load_codex_oauth_token()
+    if token:
+        env["CHATGPT_CODEX_OAUTH_TOKEN"] = token
+    return env
+
+
+def codex_auth_detected() -> bool:
+    return bool(_load_codex_oauth_token())
 
 
 def generate_with_claude_code(prompt: str, model: Optional[str] = None) -> str:
@@ -169,8 +276,7 @@ def generate_with_claude_code(prompt: str, model: Optional[str] = None) -> str:
       - If that fails, we retry without model flags
     """
     cmd = os.environ.get("OPENSIFT_CLAUDE_CODE_CMD", "claude").strip()
-    extra_args_raw = os.environ.get("OPENSIFT_CLAUDE_CODE_ARGS", "").strip()
-    extra_args = [a for a in extra_args_raw.split(" ") if a] if extra_args_raw else []
+    extra_args = _parse_cli_args(os.environ.get("OPENSIFT_CLAUDE_CODE_ARGS", "").strip())
 
     exe = _which_cmd(cmd)
     if not exe:
@@ -193,3 +299,100 @@ def generate_with_claude_code(prompt: str, model: Optional[str] = None) -> str:
         # Retry without the model flag to avoid hard coupling to a specific CLI interface
         args = [exe, *extra_args]
         return _run_subprocess(args, prompt)
+
+
+def generate_with_codex(prompt: str, model: Optional[str] = None) -> str:
+    """
+    Best-effort Codex CLI integration.
+
+    Configuration:
+      - CHATGPT_CODEX_OAUTH_TOKEN: optional token configured during setup
+      - OPENSIFT_CODEX_CMD: override command (default: codex)
+      - OPENSIFT_CODEX_ARGS: extra args (space-separated)
+
+    Invocation:
+      - Tries: codex exec --model <model> [args] -
+      - Falls back to: codex exec [args] -
+    """
+    cmd = os.environ.get("OPENSIFT_CODEX_CMD", "codex").strip()
+    env = _codex_subprocess_env()
+    for args in build_codex_cli_invocations(model=model):
+        try:
+            return _run_subprocess(args, prompt, env=env)
+        except Exception:
+            continue
+    raise RuntimeError(
+        f"Codex CLI command failed for '{cmd}'. "
+        "Check Codex auth (~/.codex/auth.json) or CHATGPT_CODEX_OAUTH_TOKEN, plus OPENSIFT_CODEX_CMD/OPENSIFT_CODEX_ARGS."
+    )
+
+
+def build_codex_cli_invocations(model: Optional[str] = None) -> List[List[str]]:
+    cmd = os.environ.get("OPENSIFT_CODEX_CMD", "codex").strip()
+    extra_args = _parse_cli_args(os.environ.get("OPENSIFT_CODEX_ARGS", "").strip())
+
+    exe = _which_cmd(cmd)
+    if not exe:
+        raise RuntimeError(
+            f"Codex CLI not found: '{cmd}'. "
+            "Install Codex or set OPENSIFT_CODEX_CMD to the correct executable."
+        )
+    if _looks_like_wrong_codex_cli(cmd):
+        raise RuntimeError(
+            f"'{cmd}' appears to be the unrelated npm 'codex' tool (site generator), not ChatGPT Codex CLI. "
+            "Install the correct ChatGPT Codex CLI and set OPENSIFT_CODEX_CMD to that executable."
+        )
+
+    chosen_model = (model or DEFAULT_OPENAI_MODEL).strip()
+    # Use non-interactive `exec` to avoid TTY-only interactive mode.
+    # "-" means prompt comes from stdin.
+    invocations: List[List[str]] = [
+        [exe, "exec", "--model", chosen_model, *extra_args, "-"],
+        [exe, "exec", *extra_args, "-"],
+    ]
+    return invocations
+
+
+async def stream_with_codex(prompt: str, model: Optional[str] = None) -> AsyncGenerator[str, None]:
+    """
+    Stream text from Codex CLI stdout.
+    Falls back through invocation variants for compatibility.
+    """
+    last_err: Optional[Exception] = None
+    env = _codex_subprocess_env()
+    for args in build_codex_cli_invocations(model=model):
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        if proc.stdin is None or proc.stdout is None:
+            last_err = RuntimeError("Codex stream could not open process pipes.")
+            continue
+
+        proc.stdin.write(prompt.encode("utf-8"))
+        await proc.stdin.drain()
+        proc.stdin.close()
+
+        seen: List[str] = []
+        while True:
+            chunk = await proc.stdout.read(256)
+            if not chunk:
+                break
+            text = chunk.decode("utf-8", errors="ignore")
+            if text:
+                seen.append(text)
+                yield text
+
+        rc = await proc.wait()
+        if rc == 0:
+            return
+
+        detail = ("".join(seen).strip() or f"exit_code={rc}")[-1200:]
+        last_err = RuntimeError(f"Codex stream command failed: {detail}")
+
+    if last_err:
+        raise last_err
+    raise RuntimeError("Codex stream command failed.")

@@ -21,7 +21,9 @@ from app.providers import (
     build_prompt,
     generate_with_claude,
     generate_with_claude_code,
+    generate_with_codex,
     generate_with_openai,
+    stream_with_codex,
 )
 from app.soul import get_global_style, set_global_style
 from app.vectordb import VectorDB
@@ -36,7 +38,7 @@ logger = configure_logging("opensift.cli")
 class ChatConfig:
     owner: str = "default"
     mode: str = "study_guide"
-    provider: str = "claude_code"  # openai | claude | claude_code
+    provider: str = "claude_code"  # openai | claude | claude_code | codex
     model: str = ""
     k: int = 8
     wrap: int = 100
@@ -51,7 +53,7 @@ Commands:
   /quit
   /owner <name>
   /mode <mode>
-  /provider <p>                 openai | claude | claude_code
+  /provider <p>                 openai | claude | claude_code | codex
   /model <name>                 Model override (empty = default)
   /k <num>
   /history <turns>
@@ -195,6 +197,8 @@ def _run_generate(cfg: ChatConfig, prompt: str) -> str:
         return generate_with_claude(prompt, model=cfg.model or DEFAULT_CLAUDE_MODEL)
     if cfg.provider == "claude_code":
         return generate_with_claude_code(prompt, model=cfg.model or DEFAULT_CLAUDE_MODEL)
+    if cfg.provider == "codex":
+        return generate_with_codex(prompt, model=cfg.model or DEFAULT_OPENAI_MODEL)
     raise RuntimeError(f"Unknown provider: {cfg.provider}")
 
 
@@ -230,6 +234,12 @@ async def _stream_anthropic(prompt: str, model: str) -> AsyncGenerator[str, None
         for text in stream.text_stream:
             if text:
                 yield text
+
+
+async def _stream_codex(prompt: str, model: str) -> AsyncGenerator[str, None]:
+    async for text in stream_with_codex(prompt, model=model):
+        if text:
+            yield text
 
 
 async def answer(
@@ -328,11 +338,17 @@ async def answer(
     print("OPENSIFT:")
     assistant_text = ""
 
-    if cfg.stream and cfg.provider in ("openai", "claude"):
+    if cfg.stream and cfg.provider in ("openai", "claude", "codex"):
         try:
             if cfg.provider == "openai":
                 model = cfg.model or DEFAULT_OPENAI_MODEL
                 async for delta in _stream_openai(prompt, model):
+                    sys.stdout.write(delta)
+                    sys.stdout.flush()
+                    assistant_text += delta
+            elif cfg.provider == "codex":
+                model = cfg.model or DEFAULT_OPENAI_MODEL
+                async for delta in _stream_codex(prompt, model):
                     sys.stdout.write(delta)
                     sys.stdout.flush()
                     assistant_text += delta
@@ -425,8 +441,8 @@ async def repl(cfg: ChatConfig) -> None:
 
             if cmd == "/provider" and len(parts) >= 2:
                 p = parts[1].strip().lower()
-                if p not in ("openai", "claude", "claude_code"):
-                    print("⚠️ provider must be: openai | claude | claude_code")
+                if p not in ("openai", "claude", "claude_code", "codex"):
+                    print("⚠️ provider must be: openai | claude | claude_code | codex")
                     continue
                 cfg.provider = p
                 print(f"✅ Provider set to: {cfg.provider}")
@@ -578,7 +594,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OpenSift Terminal Chat")
     parser.add_argument("--owner", default="default", help="Owner/namespace (default: default)")
     parser.add_argument("--mode", default="study_guide", help="Mode (default: study_guide)")
-    parser.add_argument("--provider", default="claude_code", choices=["openai", "claude", "claude_code"])
+    parser.add_argument("--provider", default="claude_code", choices=["openai", "claude", "claude_code", "codex"])
     parser.add_argument("--model", default="", help="Model override (optional)")
     parser.add_argument("--k", type=int, default=8, help="Top-k retrieval (default: 8)")
     parser.add_argument("--wrap", type=int, default=100, help="Wrap width (default: 100)")

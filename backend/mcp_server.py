@@ -18,6 +18,7 @@ from app.providers import (
     generate_with_openai,
     generate_with_claude,
     generate_with_claude_code,
+    generate_with_codex,
 )
 
 # ✅ MUST be defined before any @mcp.tool decorators
@@ -159,7 +160,7 @@ async def sift_generate(
     mode: str = "study_guide",
     k: int = 8,
     owner: Optional[str] = None,
-    provider: str = "openai",  # "openai" | "claude" | "claude_code"
+    provider: str = "openai",  # "openai" | "claude" | "claude_code" | "codex"
     model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -175,6 +176,8 @@ async def sift_generate(
     try:
         if provider == "claude_code":
             out = generate_with_claude_code(prompt, model=model)
+        elif provider == "codex":
+            out = generate_with_codex(prompt, model=model or "gpt-5.2")
         elif provider == "claude":
             out = generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest")
         else:

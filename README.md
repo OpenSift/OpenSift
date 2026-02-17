@@ -67,6 +67,7 @@ pip install -r requirements.txt
 
 Supported providers:
 	•	Claude Code (setup-token)
+	•	ChatGPT Codex (OAuth token)
 	•	Claude API (Anthropic)
 	•	OpenAI API
 
@@ -85,6 +86,17 @@ export CLAUDE_CODE_OAUTH_TOKEN="..."
 unset ANTHROPIC_API_KEY
 ```
 
+Codex users:
+
+```
+export CHATGPT_CODEX_OAUTH_TOKEN="..."
+export OPENSIFT_CODEX_CMD="codex"
+```
+
+If `codex --help` prints `Render your codex`, that executable is a different npm package.
+Set `OPENSIFT_CODEX_CMD` to your ChatGPT Codex CLI executable.
+If `CHATGPT_CODEX_OAUTH_TOKEN` is not set, OpenSift will auto-read Codex credentials from `~/.codex/auth.json`.
+
 If no provider is configured, OpenSift will still retrieve relevant passages but won’t generate AI summaries.
 
 ## 4. Run the app
@@ -102,7 +114,7 @@ python opensift.py setup
 ```
 
 This workflow lets users:
-- Enter/update API keys and tokens (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`)
+- Enter/update API keys and tokens (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_CODEX_OAUTH_TOKEN`)
 - Save settings to `backend/.env`
 - Choose launch mode: `gateway`, `ui`, `terminal`, or `both`
 
@@ -220,7 +232,9 @@ Claude API | API key | Yes | Anthropic
 
 OpenAI | API key | Yes | GPT-5.2 default
 
-* Claude Code currently uses chunk-streaming unless native token streaming is enabled.
+ChatGPT Codex | OAuth token | Yes* | Codex CLI via `OPENSIFT_CODEX_CMD` (non-interactive `codex exec`)
+
+* Claude Code currently uses chunk-streaming; Codex now attempts native CLI streaming and falls back if unavailable.
 
 📂 Project Structure
 ```text
@@ -253,6 +267,10 @@ OPENSIFT_SOUL_PATH=~/.opensift/SOUL.md
 OPENSIFT_BREAK_REMINDERS_ENABLED=true
 OPENSIFT_BREAK_REMINDER_EVERY_USER_MSGS=6
 OPENSIFT_BREAK_REMINDER_MIN_MINUTES=45
+CHATGPT_CODEX_OAUTH_TOKEN=
+OPENSIFT_CODEX_CMD=codex
+OPENSIFT_CODEX_ARGS=
+OPENSIFT_CODEX_AUTH_PATH=~/.codex/auth.json
 ```
 
 🧾 Logging
@@ -261,6 +279,9 @@ OpenSift now includes centralized logging across UI, gateway, terminal chat, and
 - Default log file: `backend/.opensift_logs/opensift.log`
 - Console logging + rotating file logs are enabled by default
 - Configure with `OPENSIFT_LOG_*` env vars above
+
+Health diagnostics:
+- `GET /health` now includes `diagnostics.codex_auth_detected` (boolean only, no secret values)
 
 🎨 SOUL Personality (Study Style)
 
