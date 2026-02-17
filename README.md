@@ -89,6 +89,17 @@ If no provider is configured, OpenSift will still retrieve relevant passages but
 
 From backend/:
 
+✅ Guided setup + launch wizard (recommended)
+
+```
+python opensift.py setup
+```
+
+This workflow lets users:
+- Enter/update API keys and tokens (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`)
+- Save settings to `backend/.env`
+- Choose launch mode: `ui`, `terminal`, or `both`
+
 ✅ Web UI (localhost)
 
 ```
@@ -241,4 +252,3 @@ MIT
 OpenSift helps students focus on understanding — not searching.
 
 It retrieves relevant material and organizes it intelligently so learners can study faster and retain more.
-
