@@ -3,9 +3,14 @@ from __future__ import annotations
 import argparse
 import getpass
 import os
+import signal
 import subprocess
 import sys
-from typing import Dict, Optional
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 
 def run_ui(host: str, port: int, reload: bool) -> None:
@@ -29,6 +34,12 @@ def run_terminal(argv: list[str]) -> None:
         cli_main()
     finally:
         sys.argv = old_argv
+
+
+@dataclass
+class ManagedProc:
+    name: str
+    proc: subprocess.Popen
 
 
 def _parse_env_file(path: str) -> Dict[str, str]:
@@ -108,6 +119,115 @@ def _terminal_args_for_provider(provider: str) -> list[str]:
     return ["--provider", provider]
 
 
+def _env_or_file(env_data: Dict[str, str], key: str) -> str:
+    return os.environ.get(key, "").strip() or env_data.get(key, "").strip()
+
+
+def _gateway_provider_summary(env_data: Dict[str, str]) -> List[str]:
+    out: List[str] = []
+    openai_key = _env_or_file(env_data, "OPENAI_API_KEY")
+    anthropic_key = _env_or_file(env_data, "ANTHROPIC_API_KEY")
+    claude_token = _env_or_file(env_data, "CLAUDE_CODE_OAUTH_TOKEN")
+    claude_cmd = _env_or_file(env_data, "OPENSIFT_CLAUDE_CODE_CMD") or "claude"
+
+    out.append(f"OpenAI API key: {'configured' if openai_key else 'not set'}")
+    out.append(f"Anthropic API key: {'configured' if anthropic_key else 'not set'}")
+    out.append(f"Claude Code token: {'configured' if claude_token else 'not set'}")
+    out.append(f"Claude Code command: {claude_cmd}")
+    return out
+
+
+def _wait_for_http_health(url: str, timeout_s: float) -> bool:
+    start = time.time()
+    while (time.time() - start) < timeout_s:
+        try:
+            with urllib.request.urlopen(url, timeout=2.0) as resp:
+                if 200 <= getattr(resp, "status", 0) < 300:
+                    return True
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+            time.sleep(0.35)
+            continue
+    return False
+
+
+def _terminate_managed(procs: List[ManagedProc]) -> None:
+    for mp in procs:
+        if mp.proc.poll() is None:
+            mp.proc.terminate()
+
+    deadline = time.time() + 6
+    for mp in procs:
+        if mp.proc.poll() is None:
+            left = max(0.1, deadline - time.time())
+            try:
+                mp.proc.wait(timeout=left)
+            except Exception:
+                pass
+
+    for mp in procs:
+        if mp.proc.poll() is None:
+            mp.proc.kill()
+
+
+def run_gateway(host: str, port: int, reload: bool, with_mcp: bool, health_timeout: float) -> int:
+    env_path = os.path.join(os.getcwd(), ".env")
+    env_data = _parse_env_file(env_path)
+
+    print("\nOpenSift Gateway")
+    print("=" * 72)
+    for line in _gateway_provider_summary(env_data):
+        print(f"- {line}")
+    print("=" * 72)
+
+    managed: List[ManagedProc] = []
+
+    ui_cmd = [sys.executable, "opensift.py", "ui", "--host", host, "--port", str(port)]
+    if reload:
+        ui_cmd.append("--reload")
+    ui_proc = subprocess.Popen(ui_cmd)
+    managed.append(ManagedProc(name="ui", proc=ui_proc))
+    print(f"[gateway] starting ui (pid={ui_proc.pid}) -> http://{host}:{port}")
+
+    if with_mcp:
+        mcp_cmd = [sys.executable, "mcp_server.py"]
+        mcp_proc = subprocess.Popen(mcp_cmd)
+        managed.append(ManagedProc(name="mcp", proc=mcp_proc))
+        print(f"[gateway] starting mcp (pid={mcp_proc.pid}) -> stdio")
+
+    stop_flag = {"stop": False}
+
+    def _handle_stop(signum, _frame):
+        _ = signum
+        stop_flag["stop"] = True
+
+    signal.signal(signal.SIGINT, _handle_stop)
+    signal.signal(signal.SIGTERM, _handle_stop)
+
+    health_url = f"http://{host}:{port}/health"
+    ok = _wait_for_http_health(health_url, timeout_s=health_timeout)
+    if not ok:
+        print(f"[gateway] ui health check failed after {health_timeout:.1f}s: {health_url}")
+        _terminate_managed(managed)
+        return 1
+
+    print(f"[gateway] ui is healthy: {health_url}")
+    print("[gateway] running. Press Ctrl+C to stop all services.")
+
+    try:
+        while not stop_flag["stop"]:
+            for mp in managed:
+                rc = mp.proc.poll()
+                if rc is not None:
+                    print(f"[gateway] service '{mp.name}' exited with code {rc}")
+                    _terminate_managed(managed)
+                    return rc if rc != 0 else 1
+            time.sleep(0.4)
+    finally:
+        _terminate_managed(managed)
+
+    return 0
+
+
 def _run_both(host: str, port: int, reload: bool, term_args: list[str]) -> None:
     cmd = [sys.executable, "opensift.py", "ui", "--host", host, "--port", str(port)]
     if reload:
@@ -162,10 +282,11 @@ def run_setup() -> None:
     print("\nLaunch mode options:")
     print("  - ui       : Web chatbot (FastAPI UI)")
     print("  - terminal : Terminal chatbot")
+    print("  - gateway  : Supervised gateway (UI + optional MCP)")
     print("  - both     : Start UI + terminal together")
     print("  - none     : Exit setup without launching")
 
-    mode = _prompt_choice("Choose launch mode", ["ui", "terminal", "both", "none"], default="ui")
+    mode = _prompt_choice("Choose launch mode", ["ui", "terminal", "gateway", "both", "none"], default="gateway")
     if mode == "none":
         print("Setup complete.")
         return
@@ -199,11 +320,15 @@ def run_setup() -> None:
     if mode == "terminal":
         run_terminal(term_args)
         return
+    if mode == "gateway":
+        with_mcp = _prompt_choice("Launch MCP server too", ["y", "n"], default="y") == "y"
+        rc = run_gateway(host=host, port=port, reload=reload, with_mcp=with_mcp, health_timeout=20.0)
+        raise SystemExit(rc)
     _run_both(host, port, reload, term_args)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OpenSift Launcher (UI or Terminal)")
+    parser = argparse.ArgumentParser(description="OpenSift Launcher (UI, Terminal, Gateway)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("setup", help="Interactive setup wizard for keys + launch mode")
@@ -224,6 +349,13 @@ def main() -> None:
     p_term.add_argument("--no-stream", action="store_true", help="Disable streaming output")
     p_term.add_argument("--no-sources", action="store_true", help="Disable sources printing")
 
+    p_gateway = sub.add_parser("gateway", help="Run supervised OpenSift gateway (UI + optional MCP)")
+    p_gateway.add_argument("--host", default="127.0.0.1", help="UI bind host (default: 127.0.0.1)")
+    p_gateway.add_argument("--port", type=int, default=8001, help="UI port (default: 8001)")
+    p_gateway.add_argument("--reload", action="store_true", help="Enable UI auto-reload")
+    p_gateway.add_argument("--with-mcp", action="store_true", help="Also launch MCP server")
+    p_gateway.add_argument("--health-timeout", type=float, default=20.0, help="Seconds to wait for UI health")
+
     args, extras = parser.parse_known_args()
 
     this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -236,6 +368,16 @@ def main() -> None:
     if args.cmd == "ui":
         run_ui(args.host, args.port, args.reload)
         return
+
+    if args.cmd == "gateway":
+        rc = run_gateway(
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            with_mcp=args.with_mcp,
+            health_timeout=args.health_timeout,
+        )
+        raise SystemExit(rc)
 
     if args.cmd == "terminal":
         forwarded = [

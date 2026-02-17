@@ -121,6 +121,26 @@ async def search(
             }
         )
 
+    if owner and not items:
+        res2 = db.query(q_emb, k=max(int(k) * 3, 24), where=None)
+        docs2 = res2.get("documents", [[]])[0]
+        metas2 = res2.get("metadatas", [[]])[0]
+        dists2 = res2.get("distances", [[]])[0]
+        ids2 = res2.get("ids", [[]])[0]
+        for i in range(len(docs2)):
+            if (metas2[i] or {}).get("owner") != owner:
+                continue
+            items.append(
+                {
+                    "id": ids2[i],
+                    "text": docs2[i],
+                    "meta": metas2[i],
+                    "distance": dists2[i],
+                }
+            )
+            if len(items) >= k:
+                break
+
     return {"ok": True, "query": query, "k": k, "owner": owner, "results": items}
 
 

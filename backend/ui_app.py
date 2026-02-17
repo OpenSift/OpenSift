@@ -6,8 +6,10 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import time
+from urllib.parse import urlparse
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import Any, AsyncGenerator, Deque, DefaultDict, Dict, List, Optional, Tuple
@@ -68,6 +70,12 @@ DEFAULT_HISTORY_TURNS = 10
 
 def _now() -> str:
     return datetime.utcnow().isoformat() + "Z"
+
+
+def _normalize_owner(owner: str) -> str:
+    owner = (owner or "").strip() or "default"
+    owner = re.sub(r"[^a-zA-Z0-9._-]+", "_", owner)
+    return owner[:128]
 
 
 def _ndjson(obj: Dict[str, Any]) -> bytes:
@@ -562,18 +570,21 @@ async def logout():
 # -----------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, owner: str = "default"):
+    owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
     return templates.TemplateResponse("chat.html", {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]})
 
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, owner: str = "default"):
+    owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
     return templates.TemplateResponse("chat.html", {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]})
 
 
 @app.post("/chat/clear")
 async def chat_clear(owner: str = Form("default")):
+    owner = _normalize_owner(owner)
     CHAT_HISTORY[owner].clear()
     _persist_owner(owner)
     return JSONResponse({"ok": True})
@@ -601,6 +612,7 @@ async def session_list():
 
 @app.get("/chat/session/export")
 async def session_export(owner: str = "default"):
+    owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
     return JSONResponse({"ok": True, "owner": owner, "history": CHAT_HISTORY[owner]})
 
@@ -611,6 +623,7 @@ async def session_import(owner: str = Form("default"), payload: str = Form(...),
     payload: JSON array of chat messages
     merge: if true, append; else replace
     """
+    owner = _normalize_owner(owner)
     try:
         data = json.loads(payload)
         if not isinstance(data, list):
@@ -637,7 +650,7 @@ async def session_import(owner: str = Form("default"), payload: str = Form(...),
 
 @app.post("/chat/session/new")
 async def session_new(owner: str = Form("default")):
-    owner = (owner or "").strip() or "default"
+    owner = _normalize_owner(owner)
     CHAT_HISTORY[owner] = []
     _persist_owner(owner)
     return JSONResponse({"ok": True, "owner": owner})
@@ -645,7 +658,7 @@ async def session_new(owner: str = Form("default")):
 
 @app.post("/chat/session/delete")
 async def session_delete(owner: str = Form(...)):
-    owner = (owner or "").strip()
+    owner = _normalize_owner(owner)
     if not owner:
         return JSONResponse({"ok": False, "error": "owner_required"}, status_code=400)
     CHAT_HISTORY.pop(owner, None)
@@ -814,34 +827,84 @@ async def flashcards_delete(owner: str = Form("default"), card_id: str = Form(..
 # -----------------------------------------------------------------------------
 @app.post("/chat/ingest/url")
 async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), source_title: str = Form("")):
+    owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
 
-    title, text = await fetch_url_text(url)
-    source = source_title.strip() or title
-    prefix = f"{owner}::{source}" if owner else source
+    raw_url = (url or "").strip()
+    if not raw_url:
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": "⚠️ URL is required.",
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
+        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
-    chunks = chunk_text(text, prefix=prefix)
-    texts = [c.text for c in chunks]
-    ids = [c.chunk_id for c in chunks]
-    metas = [{"source": source, "kind": "url", "url": url, "owner": owner, "start": c.start, "end": c.end} for c in chunks]
+    if "://" not in raw_url:
+        raw_url = f"https://{raw_url}"
 
-    embs = embed_texts(texts)
-    db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": "⚠️ Invalid URL format. Please use a full http/https URL.",
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
+        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
-    assistant_msg = {
-        "role": "assistant",
-        "ts": _now(),
-        "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{url}",
-        "sources": [],
-    }
-    CHAT_HISTORY[owner].append(assistant_msg)
-    _persist_owner(owner)
+    try:
+        title, text = await fetch_url_text(raw_url)
+        source = source_title.strip() or title
+        prefix = f"{owner}::{source}" if owner else source
 
-    return JSONResponse({"ok": True, "assistant": assistant_msg})
+        chunks = chunk_text(text, prefix=prefix)
+        if not chunks:
+            raise RuntimeError("No chunkable text extracted from URL")
+
+        texts = [c.text for c in chunks]
+        ids = [c.chunk_id for c in chunks]
+        metas = [
+            {"source": source, "kind": "url", "url": raw_url, "owner": owner, "start": c.start, "end": c.end}
+            for c in chunks
+        ]
+
+        embs = embed_texts(texts)
+        db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{raw_url}",
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
+        return JSONResponse({"ok": True, "assistant": assistant_msg})
+
+    except Exception as e:
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": (
+                f"⚠️ URL ingest failed: {e}\n\n"
+                "This page may block scraping or require JavaScript rendering. "
+                "Try another URL, upload a PDF, or paste text into a .txt/.md file."
+            ),
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
+        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
 
 @app.post("/chat/ingest/file")
 async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File(...)):
+    owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
 
     data = await file.read()
@@ -912,6 +975,7 @@ async def chat_stream(
     history_turns: int = Form(DEFAULT_HISTORY_TURNS),
     history_enabled: bool = Form(True),
 ):
+    owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
 
     async def gen() -> AsyncGenerator[bytes, None]:
@@ -948,6 +1012,25 @@ async def chat_stream(
                 continue
             results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
             passages.append({"text": docs[i], "meta": metas[i]})
+
+        # Defensive fallback: if owner-filter query returned nothing, retry a global query
+        # and apply owner filtering locally. This avoids false negatives on some DB filter paths.
+        if owner and not results:
+            try:
+                res2 = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=max(int(k) * 3, 24), where=None))
+                docs2 = res2.get("documents", [[]])[0]
+                metas2 = res2.get("metadatas", [[]])[0]
+                dists2 = res2.get("distances", [[]])[0]
+                ids2 = res2.get("ids", [[]])[0]
+                for i in range(len(docs2)):
+                    if (metas2[i] or {}).get("owner") != owner:
+                        continue
+                    results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
+                    passages.append({"text": docs2[i], "meta": metas2[i]})
+                    if len(results) >= int(k):
+                        break
+            except Exception:
+                pass
 
         if not results:
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."

@@ -598,9 +598,11 @@
       function setBusy(on) { busy.classList.toggle("on", !!on); }
 
       function owner() {
-        const o = ownerEl.value.trim() || "default";
-        ownerLabel.textContent = o;
-        return o;
+        const raw = ownerEl.value.trim() || "default";
+        const normalized = raw.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 128) || "default";
+        if (ownerEl.value !== normalized) ownerEl.value = normalized;
+        ownerLabel.textContent = normalized;
+        return normalized;
       }
 
       function autoOwnerName() {
@@ -732,20 +734,30 @@
         addBubble("user", `Ingest URL: ${url}`, new Date().toISOString());
         ingestUrlBtn.disabled = true;
 
-        const form = new FormData();
-        form.append("owner", o);
-        form.append("url", url);
-        form.append("source_title", ingestTitleEl.value.trim());
+        try {
+          const form = new FormData();
+          form.append("owner", o);
+          form.append("url", url);
+          form.append("source_title", ingestTitleEl.value.trim());
 
-        const res = await fetch("/chat/ingest/url", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
+          const res = await fetch("/chat/ingest/url", { method: "POST", body: form });
+          if (!(await ensureAuth(res))) return;
 
-        const data = await res.json();
-        addBubble("assistant", data?.assistant?.text || "URL ingest failed.", new Date().toISOString());
+          let data = null;
+          try { data = await res.json(); } catch { data = null; }
+          const msg = data?.assistant?.text || `URL ingest failed (HTTP ${res.status}).`;
+          addBubble("assistant", msg, new Date().toISOString());
 
-        ingestTitleEl.value = "";
-        ingestUrlEl.value = "";
-        ingestUrlBtn.disabled = false;
+          if (res.ok) {
+            ingestTitleEl.value = "";
+            ingestUrlEl.value = "";
+            await loadSessions();
+          }
+        } catch (e) {
+          addBubble("assistant", `URL ingest failed: ${e}`, new Date().toISOString());
+        } finally {
+          ingestUrlBtn.disabled = false;
+        }
       }
 
       async function ingestFile() {

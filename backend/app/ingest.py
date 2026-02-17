@@ -112,6 +112,11 @@ def _extract_main_text(soup: BeautifulSoup) -> str:
     return _normalize_text("\n".join(pieces))
 
 
+def _extract_page_text_fallback(soup: BeautifulSoup) -> str:
+    root = soup.body if soup.body is not None else soup
+    return _normalize_text(root.get_text("\n", strip=True))
+
+
 def _truncate_for_storage(text: str, max_chars: int = MAX_ARTICLE_CHARS) -> str:
     text = text.strip()
     if len(text) <= max_chars:
@@ -254,6 +259,12 @@ async def fetch_url_text(url: str) -> Tuple[str, str]:
     text = _truncate_for_storage(_normalize_text(text))
 
     if len(text) < 120:
+        # Fallback for pages where structural extraction fails but readable body text exists.
+        fallback_text = _truncate_for_storage(_extract_page_text_fallback(soup))
+        if len(fallback_text) > len(text):
+            text = fallback_text
+
+    if len(text) < 80:
         raise RuntimeError("Could not extract enough article text from URL")
 
     return title, text

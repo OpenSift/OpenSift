@@ -244,6 +244,23 @@ async def answer(
         results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
         passages.append({"text": docs[i], "meta": metas[i]})
 
+    if cfg.owner and not results:
+        try:
+            res2 = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=max(int(cfg.k) * 3, 24), where=None))
+            docs2 = res2.get("documents", [[]])[0]
+            metas2 = res2.get("metadatas", [[]])[0]
+            dists2 = res2.get("distances", [[]])[0]
+            ids2 = res2.get("ids", [[]])[0]
+            for i in range(len(docs2)):
+                if (metas2[i] or {}).get("owner") != cfg.owner:
+                    continue
+                results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
+                passages.append({"text": docs2[i], "meta": metas2[i]})
+                if len(results) >= int(cfg.k):
+                    break
+        except Exception:
+            pass
+
     if not results:
         msg = "🤷 No matches yet. Ingest a URL/PDF first, or try different keywords."
         print(_wrap(msg, cfg.wrap))

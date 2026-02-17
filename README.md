@@ -103,7 +103,18 @@ python opensift.py setup
 This workflow lets users:
 - Enter/update API keys and tokens (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`)
 - Save settings to `backend/.env`
-- Choose launch mode: `ui`, `terminal`, or `both`
+- Choose launch mode: `gateway`, `ui`, `terminal`, or `both`
+
+✅ Gateway runner (recommended for local orchestration)
+
+```bash
+python opensift.py gateway --with-mcp
+```
+
+Gateway mode:
+- Supervises OpenSift UI and optional MCP server from one command
+- Runs startup health checks (`/health`)
+- Handles graceful shutdown for all managed processes
 
 ✅ Web UI (localhost)
 
