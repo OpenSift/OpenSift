@@ -10,6 +10,7 @@ from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts  # embeddings for retrieval
 from app.logging_utils import configure_logging
+from app.soul import get_global_style, set_global_style
 
 # Optional generation providers (only used if you added sift_generate)
 from app.providers import (
@@ -168,7 +169,8 @@ async def sift_generate(
     res = await search(query=query, k=k, owner=owner)
     passages = [{"text": r["text"], "meta": r["meta"]} for r in res["results"]]
 
-    prompt = build_prompt(mode=mode, query=query, passages=passages)
+    style = get_global_style()
+    prompt = build_prompt(mode=mode, query=query, passages=passages, study_style=style)
 
     try:
         if provider == "claude_code":
@@ -188,6 +190,25 @@ async def sift_generate(
 
     logger.info("mcp_sift_generate_done owner=%s sources=%d", owner, len(res["results"]))
     return {"ok": True, "answer": out, "sources": res["results"]}
+
+
+@mcp.tool()
+async def soul_get(owner: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get global study-style personality text from SOUL.md.
+    """
+    _ = owner
+    return {"ok": True, "scope": "global", "style": get_global_style()}
+
+
+@mcp.tool()
+async def soul_set(style: str, owner: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Set global study-style personality text in SOUL.md.
+    """
+    _ = owner
+    set_global_style(style)
+    return {"ok": True, "scope": "global", "style": get_global_style()}
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from app.providers import (
     generate_with_claude_code,
     generate_with_openai,
 )
+from app.soul import get_global_style, set_global_style
 from app.vectordb import VectorDB
 
 from session_store import DEFAULT_DIR, list_sessions, load_session, save_session
@@ -56,6 +57,9 @@ Commands:
   /history on|off
   /sources on|off
   /stream on|off
+  /style                         Show global study style
+  /style set <text>              Set global study style
+  /style clear                   Clear global study style
   /clear
 
 Sessions:
@@ -81,12 +85,14 @@ def _wrap(text: str, width: int) -> str:
 
 
 def _print_banner(cfg: ChatConfig) -> None:
+    style = get_global_style()
     print("\n" + "=" * 72)
     print("OpenSift — Terminal Chat")
     print(
         f"Owner: {cfg.owner} | Mode: {cfg.mode} | Provider: {cfg.provider} | k={cfg.k} | "
         f"history={cfg.history_turns} | stream={'on' if cfg.stream else 'off'}"
     )
+    print(f"Study style: {'configured' if style else 'default/none'}")
     print(f"Defaults: OpenAI={DEFAULT_OPENAI_MODEL} | Claude={DEFAULT_CLAUDE_MODEL}")
     print("Type /help for commands. Type /quit to exit.")
     print("=" * 72 + "\n")
@@ -312,7 +318,8 @@ async def answer(
 
     convo = _build_history_block(history[:-1], cfg.history_turns) if history_enabled else ""
     query_for_prompt = f"Conversation so far:\n{convo}\n\nNew question:\n{question}" if convo else question
-    prompt = build_prompt(mode=cfg.mode, query=query_for_prompt, passages=passages)
+    study_style = get_global_style()
+    prompt = build_prompt(mode=cfg.mode, query=query_for_prompt, passages=passages, study_style=study_style)
 
     print("OPENSIFT:")
     assistant_text = ""
@@ -389,6 +396,8 @@ async def repl(cfg: ChatConfig) -> None:
                 cfg.owner = parts[1].strip()
                 history = load_session(cfg.owner, DEFAULT_DIR)
                 print(f"✅ Owner set to: {cfg.owner} (loaded {len(history)} msgs)")
+                style = get_global_style()
+                print(f"🎨 Global study style: {'configured' if style else 'default/none'}")
                 continue
 
             if cmd == "/mode" and len(parts) >= 2:
@@ -447,6 +456,31 @@ async def repl(cfg: ChatConfig) -> None:
                     continue
                 cfg.stream = (v == "on")
                 print(f"✅ stream: {'on' if cfg.stream else 'off'}")
+                continue
+
+            if cmd == "/style":
+                if len(parts) == 1:
+                    style = get_global_style()
+                    if not style:
+                        print("No global study style set.")
+                    else:
+                        print("\nCurrent global study style:\n")
+                        print(_wrap(style, cfg.wrap))
+                    continue
+                sub = parts[1].strip().lower()
+                if sub == "clear":
+                    set_global_style("")
+                    print("✅ Cleared global study style.")
+                    continue
+                if sub == "set":
+                    style_text = line.split(" ", 2)[2].strip() if len(parts) >= 3 else ""
+                    if not style_text:
+                        print("⚠️ Usage: /style set <text>")
+                        continue
+                    set_global_style(style_text)
+                    print("✅ Updated global study style.")
+                    continue
+                print("⚠️ Usage: /style | /style set <text> | /style clear")
                 continue
 
             if cmd == "/save":

@@ -35,6 +35,7 @@ from app.providers import (
     generate_with_claude_code,
     generate_with_openai,
 )
+from app.soul import get_global_style, set_global_style
 from app.vectordb import VectorDB
 
 from session_store import DEFAULT_DIR as SESSION_DIR, delete_session, list_sessions, load_session, save_session
@@ -709,6 +710,21 @@ async def session_delete(owner: str = Form(...)):
     return JSONResponse({"ok": True, "owner": owner})
 
 
+@app.get("/chat/soul")
+async def soul_get(owner: str = "default"):
+    _ = owner
+    style = get_global_style()
+    return JSONResponse({"ok": True, "scope": "global", "style": style})
+
+
+@app.post("/chat/soul/set")
+async def soul_set(owner: str = Form("default"), style: str = Form("")):
+    _ = owner
+    set_global_style(style)
+    logger.info("soul_set scope=global chars=%d", len((style or "").strip()))
+    return JSONResponse({"ok": True, "scope": "global", "style": get_global_style()})
+
+
 # -----------------------------------------------------------------------------
 # Study library endpoints
 # -----------------------------------------------------------------------------
@@ -1139,7 +1155,9 @@ async def chat_stream(
         # History-aware prompt
         convo = _build_history_block(CHAT_HISTORY[owner][:-1], int(history_turns)) if history_enabled else ""
         query_for_prompt = f"Conversation so far:\n{convo}\n\nNew question:\n{message}" if convo else message
-        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages)
+        study_style = get_global_style()
+        logger.info("chat_stream_style owner=%s style_chars=%d", owner, len(study_style))
+        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages, study_style=study_style)
 
         yield _ndjson({"type": "status", "text": "Thinking…"})
 

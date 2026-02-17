@@ -13,7 +13,7 @@ DEFAULT_OPENAI_MODEL = "gpt-5.2"
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5"  # alias -> always latest Sonnet 4.5
 
 
-def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]]) -> str:
+def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]], study_style: str = "") -> str:
     """
     Build a single text prompt used across providers.
     `passages` items: {"text": "...", "meta": {...}}
@@ -50,7 +50,15 @@ def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]]) -> str:
         ),
     }.get(mode, "You are OpenSift. Use ONLY the provided context to answer as helpfully as possible.")
 
+    style_block = (study_style or "").strip()
+    if style_block:
+        style_text = f"STUDY STYLE PREFERENCES:\n{style_block}\n"
+    else:
+        style_text = ""
+
     prompt = f"""{instructions}
+
+{style_text}
 
 CONTEXT:
 {context if context else "(no context provided)"}
@@ -61,6 +69,7 @@ QUESTION:
 RULES:
 - If the context does not contain enough information, say so and suggest what to ingest next.
 - When helpful, cite sources by [number] (e.g., [1], [2]).
+- Follow STUDY STYLE PREFERENCES when present, but never invent facts beyond CONTEXT.
 """
     return prompt
 

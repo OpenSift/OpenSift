@@ -248,6 +248,7 @@ OPENSIFT_LOG_LEVEL=INFO
 OPENSIFT_LOG_DIR=.opensift_logs
 OPENSIFT_LOG_MAX_BYTES=5242880
 OPENSIFT_LOG_BACKUP_COUNT=5
+OPENSIFT_SOUL_PATH=~/.opensift/SOUL.md
 ```
 
 🧾 Logging
@@ -256,6 +257,14 @@ OpenSift now includes centralized logging across UI, gateway, terminal chat, and
 - Default log file: `backend/.opensift_logs/opensift.log`
 - Console logging + rotating file logs are enabled by default
 - Configure with `OPENSIFT_LOG_*` env vars above
+
+🎨 SOUL Personality (Study Style)
+
+OpenSift now supports a global study style personality stored in `~/.opensift/SOUL.md` by default (override with `OPENSIFT_SOUL_PATH`) and applied everywhere (UI, terminal, all owners).
+- UI: edit **Global Study Style (SOUL)** in the left sidebar, then click **Save Style**
+- Terminal: use `/style`, `/style set <text>`, `/style clear`
+- Styles are injected into generation prompts while still grounding answers in retrieved sources
+- Legacy per-owner SOUL entries are automatically migrated into the global style block
 
 🧭 Roadmap
 	•	True token streaming from providers

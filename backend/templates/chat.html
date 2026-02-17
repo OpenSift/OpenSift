@@ -78,18 +78,31 @@
 
       .sb-actions,
       .sb-owner,
+      .sb-soul,
       .sb-newchat {
         padding: 12px var(--space-3);
         border-bottom: 1px solid var(--line);
       }
 
       .sb-owner label,
+      .sb-soul label,
       .sb-newchat label {
         display:block;
         font-size: 11px;
         color: var(--muted);
         margin-bottom: 6px;
         letter-spacing: .25px;
+      }
+
+      #soulStyle {
+        min-height: 88px;
+        resize: vertical;
+      }
+
+      .soul-actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
       }
 
       .newchat-row {
@@ -429,6 +442,16 @@
           <input id="owner" value="{{ owner }}" placeholder="bio101" />
         </div>
 
+        <div class="sb-soul">
+          <label for="soulStyle">Global Study Style (SOUL)</label>
+          <textarea id="soulStyle" placeholder="Example: teach me with analogies, short bullets, and practice questions."></textarea>
+          <div class="soul-actions">
+            <button id="saveSoulBtn" type="button"><span class="icon">★</span>Save Style</button>
+            <button id="clearSoulBtn" type="button" class="danger"><span class="icon">✕</span>Clear</button>
+          </div>
+          <div class="hint" id="soulHint" style="margin-top:6px;">Saved globally in SOUL.md (applies everywhere)</div>
+        </div>
+
         <div class="history-wrap">
           <div class="history-title">Chats</div>
           <div class="history-list" id="historyList"></div>
@@ -549,6 +572,10 @@
       const chat = document.getElementById("chat");
       const ownerEl = document.getElementById("owner");
       const ownerLabel = document.getElementById("ownerLabel");
+      const soulStyleEl = document.getElementById("soulStyle");
+      const saveSoulBtn = document.getElementById("saveSoulBtn");
+      const clearSoulBtn = document.getElementById("clearSoulBtn");
+      const soulHintEl = document.getElementById("soulHint");
       const msgEl = document.getElementById("msg");
       const modeEl = document.getElementById("mode");
       const providerEl = document.getElementById("provider");
@@ -603,6 +630,35 @@
         if (ownerEl.value !== normalized) ownerEl.value = normalized;
         ownerLabel.textContent = normalized;
         return normalized;
+      }
+
+      async function loadSoulStyle() {
+        const res = await fetch("/chat/soul");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        soulStyleEl.value = data.style || "";
+        soulHintEl.textContent = soulStyleEl.value.trim()
+          ? "Global style active (all chats/owners)."
+          : "No global style set.";
+      }
+
+      async function saveSoulStyle() {
+        const form = new FormData();
+        form.append("style", (soulStyleEl.value || "").trim());
+        const res = await fetch("/chat/soul/set", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        soulStyleEl.value = data.style || "";
+        soulHintEl.textContent = soulStyleEl.value.trim()
+          ? "Custom style saved."
+          : "Style cleared. Default style will be used.";
+      }
+
+      async function clearSoulStyle() {
+        soulStyleEl.value = "";
+        await saveSoulStyle();
       }
 
       function autoOwnerName() {
@@ -842,6 +898,7 @@
       async function openSession(ownerName) {
         ownerEl.value = ownerName;
         owner();
+        await loadSoulStyle();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(ownerName)}`);
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
@@ -873,6 +930,7 @@
         newChatNameEl.value = "";
         ownerEl.value = nextOwner;
         owner();
+        await loadSoulStyle();
         chat.innerHTML = "";
         await loadSessions();
       }
@@ -1149,6 +1207,8 @@
       clearBtn.addEventListener("click", clearChat);
       logoutBtn.addEventListener("click", logout);
       saveStudyBtn.addEventListener("click", saveLastStudy);
+      saveSoulBtn.addEventListener("click", saveSoulStyle);
+      clearSoulBtn.addEventListener("click", clearSoulStyle);
       newChatBtn.addEventListener("click", startNewChat);
       newChatNameEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
@@ -1173,7 +1233,9 @@
 
       ownerEl.addEventListener("change", async () => {
         owner();
+        await loadSoulStyle();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(owner())}`);
+        if (!(await ensureAuth(res))) return;
         if (res.ok) {
           const data = await res.json();
           renderHistory(data.history || []);
@@ -1189,6 +1251,7 @@
 
       scrollToBottom();
       owner();
+      loadSoulStyle();
       loadSessions();
     </script>
   </body>
