@@ -53,6 +53,21 @@ source .venv/bin/activate
 ```
 (Recommended: Python 3.12 or 3.13)
 
+### One-command bootstrap (recommended)
+
+From `backend/`:
+
+```bash
+./setup.sh
+```
+
+This script will:
+- verify Python 3.12+
+- create/activate `.venv`
+- install dependencies (`openai`, `anthropic`, `sentence-transformers`, `-r requirements.txt`)
+- prompt for API keys/tokens and write `backend/.env`
+- run the full OpenSift setup wizard (`python opensift.py setup --skip-key-prompts`)
+
 ## 2. Install dependencies
 
 ```

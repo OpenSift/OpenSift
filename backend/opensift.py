@@ -322,7 +322,7 @@ def _run_both(host: str, port: int, reload: bool, term_args: list[str]) -> None:
             ui_proc.kill()
 
 
-def run_setup() -> None:
+def run_setup(skip_key_prompts: bool = False) -> None:
     env_path = os.path.join(os.getcwd(), ".env")
     env_data = _parse_env_file(env_path)
 
@@ -330,38 +330,41 @@ def run_setup() -> None:
     print("=" * 72)
     print("This will configure API/token keys and optionally launch OpenSift.\n")
 
-    key_specs = [
-        ("OPENAI_API_KEY", "OpenAI API key (optional)"),
-        ("ANTHROPIC_API_KEY", "Anthropic API key (optional)"),
-        ("CLAUDE_CODE_OAUTH_TOKEN", "Claude Code OAuth token (optional)"),
-        ("CHATGPT_CODEX_OAUTH_TOKEN", "ChatGPT Codex OAuth token (optional)"),
-        ("OPENSIFT_CLAUDE_CODE_CMD", "Claude Code command (default: claude)"),
-        ("OPENSIFT_CLAUDE_CODE_ARGS", "Claude Code extra args (optional)"),
-        ("OPENSIFT_CODEX_CMD", "Codex command (default: codex)"),
-        ("OPENSIFT_CODEX_ARGS", "Codex extra args (optional)"),
-    ]
-
     updated = dict(env_data)
-    for key, label in key_specs:
-        secret = key not in (
-            "OPENSIFT_CLAUDE_CODE_CMD",
-            "OPENSIFT_CLAUDE_CODE_ARGS",
-            "OPENSIFT_CODEX_CMD",
-            "OPENSIFT_CODEX_ARGS",
-        )
-        current = updated.get(key, "")
-        value = _prompt_value(label, current=current, secret=secret)
-        if value is None:
-            continue
-        if value == "":
-            updated.pop(key, None)
-        else:
-            updated[key] = value
+    if not skip_key_prompts:
+        key_specs = [
+            ("OPENAI_API_KEY", "OpenAI API key (optional)"),
+            ("ANTHROPIC_API_KEY", "Anthropic API key (optional)"),
+            ("CLAUDE_CODE_OAUTH_TOKEN", "Claude Code OAuth token (optional)"),
+            ("CHATGPT_CODEX_OAUTH_TOKEN", "ChatGPT Codex OAuth token (optional)"),
+            ("OPENSIFT_CLAUDE_CODE_CMD", "Claude Code command (default: claude)"),
+            ("OPENSIFT_CLAUDE_CODE_ARGS", "Claude Code extra args (optional)"),
+            ("OPENSIFT_CODEX_CMD", "Codex command (default: codex)"),
+            ("OPENSIFT_CODEX_ARGS", "Codex extra args (optional)"),
+        ]
 
-    _write_env_file(env_path, updated)
+        for key, label in key_specs:
+            secret = key not in (
+                "OPENSIFT_CLAUDE_CODE_CMD",
+                "OPENSIFT_CLAUDE_CODE_ARGS",
+                "OPENSIFT_CODEX_CMD",
+                "OPENSIFT_CODEX_ARGS",
+            )
+            current = updated.get(key, "")
+            value = _prompt_value(label, current=current, secret=secret)
+            if value is None:
+                continue
+            if value == "":
+                updated.pop(key, None)
+            else:
+                updated[key] = value
+
+        _write_env_file(env_path, updated)
+        print(f"\nSaved environment config: {env_path}")
+    else:
+        print("\nSkipping key prompts (using existing .env values).")
+
     _apply_env(updated)
-
-    print(f"\nSaved environment config: {env_path}")
     codex_cmd = (updated.get("OPENSIFT_CODEX_CMD") or "codex").strip()
     if updated.get("CHATGPT_CODEX_OAUTH_TOKEN") and _cmd_looks_like_wrong_codex(codex_cmd):
         print("\n⚠️ Codex command validation warning:")
@@ -423,7 +426,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OpenSift Launcher (UI, Terminal, Gateway)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("setup", help="Interactive setup wizard for keys + launch mode")
+    p_setup = sub.add_parser("setup", help="Interactive setup wizard for keys + launch mode")
+    p_setup.add_argument(
+        "--skip-key-prompts",
+        action="store_true",
+        help="Skip key/token prompts and use existing values from .env",
+    )
 
     p_ui = sub.add_parser("ui", help="Run localhost web UI")
     p_ui.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
@@ -454,8 +462,8 @@ def main() -> None:
     os.chdir(this_dir)
 
     if args.cmd == "setup":
-        logger.info("launcher_cmd setup")
-        run_setup()
+        logger.info("launcher_cmd setup skip_key_prompts=%s", bool(getattr(args, "skip_key_prompts", False)))
+        run_setup(skip_key_prompts=bool(getattr(args, "skip_key_prompts", False)))
         return
 
     if args.cmd == "ui":
