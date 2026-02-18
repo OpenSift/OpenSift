@@ -768,6 +768,23 @@
         return { textEl: textNode };
       }
 
+      function setIconButtonLabel(btn, icon, label) {
+        btn.textContent = "";
+        const iconEl = document.createElement("span");
+        iconEl.className = "icon";
+        iconEl.textContent = icon;
+        btn.appendChild(iconEl);
+        btn.appendChild(document.createTextNode(label));
+      }
+
+      function appendTextBlock(parent, className, text) {
+        const el = document.createElement("div");
+        el.className = className;
+        el.textContent = text || "";
+        parent.appendChild(el);
+        return el;
+      }
+
       function renderHistory(messages) {
         chat.innerHTML = "";
         for (const m of messages || []) {
@@ -936,30 +953,31 @@
 
         historyList.innerHTML = "";
         if (!sessions.length) {
-          historyList.innerHTML = '<div class="hint">No chats yet.</div>';
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No chats yet.";
+          historyList.appendChild(hint);
           return;
         }
 
         for (const s of sessions) {
           const card = document.createElement("div");
           card.className = "session-item";
-          card.innerHTML = `
-            <div class="session-item-title">${s.owner}</div>
-            <div class="session-item-meta">${s.count || 0} msgs · ${s.last_ts || ""}</div>
-          `;
+          appendTextBlock(card, "session-item-title", s.owner || "");
+          appendTextBlock(card, "session-item-meta", `${s.count || 0} msgs · ${s.last_ts || ""}`);
 
           const actions = document.createElement("div");
           actions.className = "session-item-actions";
 
           const openBtn = document.createElement("button");
           openBtn.type = "button";
-          openBtn.innerHTML = '<span class="icon">↗</span>Open';
+          setIconButtonLabel(openBtn, "↗", "Open");
           openBtn.addEventListener("click", () => openSession(s.owner));
 
           const delBtn = document.createElement("button");
           delBtn.type = "button";
           delBtn.className = "danger";
-          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          setIconButtonLabel(delBtn, "✕", "Delete");
           delBtn.addEventListener("click", () => deleteSessionByOwner(s.owner));
 
           actions.appendChild(openBtn);
@@ -1020,31 +1038,32 @@
         libraryList.innerHTML = "";
 
         if (!items.length) {
-          libraryList.innerHTML = `<div class="hint">No saved items for <code>${o}</code>.</div>`;
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = `No saved items for ${o}.`;
+          libraryList.appendChild(hint);
           return;
         }
 
         for (const item of items) {
           const card = document.createElement("div");
           card.className = "item";
-          card.innerHTML = `
-            <div class="item-title">${item.title || "Saved Study Item"}</div>
-            <div class="item-meta">${item.mode || "study"} · ${item.created_at || ""}</div>
-            <div class="item-preview">${item.preview || ""}</div>
-          `;
+          appendTextBlock(card, "item-title", item.title || "Saved Study Item");
+          appendTextBlock(card, "item-meta", `${item.mode || "study"} · ${item.created_at || ""}`);
+          appendTextBlock(card, "item-preview", item.preview || "");
 
           const actions = document.createElement("div");
           actions.className = "item-actions";
 
           const openBtn = document.createElement("button");
           openBtn.type = "button";
-          openBtn.innerHTML = '<span class="icon">↗</span>Open';
+          setIconButtonLabel(openBtn, "↗", "Open");
           openBtn.addEventListener("click", () => openStudyItem(item.id));
 
           const delBtn = document.createElement("button");
           delBtn.type = "button";
           delBtn.className = "danger";
-          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          setIconButtonLabel(delBtn, "✕", "Delete");
           delBtn.addEventListener("click", () => deleteStudyItem(item.id));
 
           actions.appendChild(openBtn);
@@ -1117,18 +1136,19 @@
 
         quizList.innerHTML = "";
         if (!attempts.length) {
-          quizList.innerHTML = '<div class="hint">No attempts yet.</div>';
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No attempts yet.";
+          quizList.appendChild(hint);
           return;
         }
 
         for (const a of attempts) {
           const card = document.createElement("div");
           card.className = "item";
-          card.innerHTML = `
-            <div class="item-title">${a.title || "Quiz Attempt"}</div>
-            <div class="item-meta">${a.score}/${a.total} (${a.pct}%) · ${a.created_at || ""}</div>
-            <div class="item-preview">${a.notes || ""}</div>
-          `;
+          appendTextBlock(card, "item-title", a.title || "Quiz Attempt");
+          appendTextBlock(card, "item-meta", `${a.score}/${a.total} (${a.pct}%) · ${a.created_at || ""}`);
+          appendTextBlock(card, "item-preview", a.notes || "");
 
           const actions = document.createElement("div");
           actions.className = "item-actions";
@@ -1136,7 +1156,7 @@
           const delBtn = document.createElement("button");
           delBtn.type = "button";
           delBtn.className = "danger";
-          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          setIconButtonLabel(delBtn, "✕", "Delete");
           delBtn.addEventListener("click", () => deleteQuizAttempt(a.id));
 
           actions.appendChild(delBtn);
@@ -1189,31 +1209,38 @@
         flashcardList.innerHTML = "";
 
         if (!cards.length) {
-          flashcardList.innerHTML = '<div class="hint">No cards for this filter.</div>';
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No cards for this filter.";
+          flashcardList.appendChild(hint);
           return;
         }
 
         for (const c of cards) {
           const card = document.createElement("div");
           card.className = "item";
-          card.innerHTML = `
-            <div class="item-title">${c.front || ""}</div>
-            <div class="item-meta">due: ${c.due_at || ""} · interval: ${c.interval_days || 0}d · streak: ${c.streak || 0}</div>
-            <div class="item-preview" style="display:none;" id="back-${c.id}">${c.back || ""}</div>
-            <div class="item-meta">${c.tags || ""}</div>
-          `;
+          appendTextBlock(card, "item-title", c.front || "");
+          appendTextBlock(
+            card,
+            "item-meta",
+            `due: ${c.due_at || ""} · interval: ${c.interval_days || 0}d · streak: ${c.streak || 0}`
+          );
+          const backPreview = appendTextBlock(card, "item-preview", c.back || "");
+          backPreview.style.display = "none";
+          backPreview.id = `back-${c.id || ""}`;
+          appendTextBlock(card, "item-meta", c.tags || "");
 
           const actions = document.createElement("div");
           actions.className = "item-actions";
 
           const showBtn = document.createElement("button");
           showBtn.type = "button";
-          showBtn.innerHTML = '<span class="icon">◷</span>Show';
+          setIconButtonLabel(showBtn, "◷", "Show");
           showBtn.addEventListener("click", () => {
             const back = document.getElementById(`back-${c.id}`);
             const visible = back.style.display !== "none";
             back.style.display = visible ? "none" : "block";
-            showBtn.innerHTML = visible ? '<span class="icon">◷</span>Show' : '<span class="icon">◷</span>Hide';
+            setIconButtonLabel(showBtn, "◷", visible ? "Show" : "Hide");
           });
 
           for (const r of ["again", "hard", "good", "easy"]) {
@@ -1227,7 +1254,7 @@
           const delBtn = document.createElement("button");
           delBtn.type = "button";
           delBtn.className = "danger";
-          delBtn.innerHTML = '<span class="icon">✕</span>Delete';
+          setIconButtonLabel(delBtn, "✕", "Delete");
           delBtn.addEventListener("click", () => deleteFlashcard(c.id));
 
           actions.prepend(showBtn);

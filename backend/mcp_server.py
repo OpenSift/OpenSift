@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import os
 from typing import Any, Dict, List, Optional
 
+import anyio
 from mcp.server.fastmcp import FastMCP
 
 from app.vectordb import VectorDB
@@ -25,6 +27,8 @@ from app.providers import (
 mcp = FastMCP("OpenSift")
 db = VectorDB()
 logger = configure_logging("opensift.mcp")
+MAX_INGEST_MB = max(1, int(os.getenv("OPENSIFT_MAX_UPLOAD_MB", "25")))
+MAX_INGEST_BYTES = MAX_INGEST_MB * 1024 * 1024
 
 
 def _detect_and_extract_text(filename: str, data: bytes) -> tuple[str, str]:
@@ -45,9 +49,14 @@ async def ingest_file(
     """
     Ingest a file into the OpenSift vector store.
     """
-    data = base64.b64decode(content_base64)
+    try:
+        data = base64.b64decode(content_base64, validate=True)
+    except Exception:
+        return {"ok": False, "error": "Invalid base64 file payload."}
+    if len(data) > MAX_INGEST_BYTES:
+        return {"ok": False, "error": f"File too large. Max allowed is {MAX_INGEST_MB} MB."}
     logger.info("mcp_ingest_file_start owner=%s filename=%s", owner, filename)
-    kind, text = _detect_and_extract_text(filename, data)
+    kind, text = await anyio.to_thread.run_sync(lambda: _detect_and_extract_text(filename, data))
     if not text.strip():
         return {"ok": False, "error": "No text extracted."}
 
@@ -61,8 +70,8 @@ async def ingest_file(
         for c in chunks
     ]
 
-    embs = embed_texts(texts)
-    db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    embs = await anyio.to_thread.run_sync(lambda: embed_texts(texts))
+    await anyio.to_thread.run_sync(lambda: db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs))
     logger.info("mcp_ingest_file_success owner=%s filename=%s chunks=%d", owner, filename, len(chunks))
 
     return {"ok": True, "ingested": len(chunks), "source": filename, "owner": owner}
@@ -91,8 +100,8 @@ async def ingest_url(
         for c in chunks
     ]
 
-    embs = embed_texts(texts)
-    db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    embs = await anyio.to_thread.run_sync(lambda: embed_texts(texts))
+    await anyio.to_thread.run_sync(lambda: db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs))
     logger.info("mcp_ingest_url_success owner=%s source=%s chunks=%d", owner, source, len(chunks))
 
     return {"ok": True, "ingested": len(chunks), "source": source, "url": url, "owner": owner}
@@ -108,9 +117,9 @@ async def search(
     Retrieve top-k relevant passages for a query.
     """
     logger.info("mcp_search_start owner=%s k=%d", owner, k)
-    q_emb = embed_texts([query])[0]
+    q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([query])[0])
     owner_where = {"owner": owner} if owner else None
-    res = db.query(q_emb, k=k, where=owner_where)
+    res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=k, where=owner_where))
 
     docs = res.get("documents", [[]])[0]
     metas = res.get("metadatas", [[]])[0]
@@ -131,7 +140,7 @@ async def search(
         )
 
     if owner and not items:
-        res2 = db.query(q_emb, k=max(int(k) * 3, 24), where=None)
+        res2 = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=max(int(k) * 3, 24), where=None))
         docs2 = res2.get("documents", [[]])[0]
         metas2 = res2.get("metadatas", [[]])[0]
         dists2 = res2.get("distances", [[]])[0]
@@ -175,13 +184,13 @@ async def sift_generate(
 
     try:
         if provider == "claude_code":
-            out = generate_with_claude_code(prompt, model=model)
+            out = await anyio.to_thread.run_sync(lambda: generate_with_claude_code(prompt, model=model))
         elif provider == "codex":
-            out = generate_with_codex(prompt, model=model or "gpt-5.2")
+            out = await anyio.to_thread.run_sync(lambda: generate_with_codex(prompt, model=model or "gpt-5.2"))
         elif provider == "claude":
-            out = generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest")
+            out = await anyio.to_thread.run_sync(lambda: generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest"))
         else:
-            out = generate_with_openai(prompt, model=model or "gpt-4.1-mini")
+            out = await anyio.to_thread.run_sync(lambda: generate_with_openai(prompt, model=model or "gpt-4.1-mini"))
     except Exception as e:
         logger.exception("mcp_sift_generate_failed owner=%s provider=%s", owner, provider)
         return {

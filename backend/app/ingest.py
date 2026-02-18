@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import io
+import ipaddress
 import os
 import re
+import socket
+from urllib.parse import urlparse
 from typing import List, Optional, Tuple
 
+import anyio
 import httpx
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
@@ -14,6 +18,7 @@ MAX_URL_RETRIES = 3
 URL_TIMEOUT = httpx.Timeout(40.0, connect=15.0)
 MAX_ARTICLE_CHARS = 350_000
 MIN_EXTRACTED_CHARS = 500
+ALLOW_PRIVATE_URLS = os.getenv("OPENSIFT_ALLOW_PRIVATE_URLS", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _normalize_text(text: str) -> str:
@@ -127,6 +132,73 @@ def _truncate_for_storage(text: str, max_chars: int = MAX_ARTICLE_CHARS) -> str:
     if split > max_chars * 0.7:
         cut = cut[:split]
     return cut.strip()
+
+
+def _is_blocked_host_label(hostname: str) -> bool:
+    h = (hostname or "").strip().lower().rstrip(".")
+    if not h:
+        return True
+    if h in ("localhost",):
+        return True
+    if h.endswith(".localhost") or h.endswith(".local"):
+        return True
+    return False
+
+
+def _is_blocked_ip(value: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _validate_remote_url_sync(url: str) -> None:
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError("Only http/https URLs are allowed.")
+    if not parsed.hostname:
+        raise RuntimeError("URL must include a hostname.")
+    if _is_blocked_host_label(parsed.hostname):
+        raise RuntimeError("Local hostnames are blocked for URL ingest.")
+
+    if ALLOW_PRIVATE_URLS:
+        return
+
+    # Block direct private IP usage and private IP DNS resolution.
+    if _is_blocked_ip(parsed.hostname):
+        raise RuntimeError("Private/local IP targets are blocked for URL ingest.")
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise RuntimeError(f"DNS resolution failed for host: {parsed.hostname}") from e
+
+    if not infos:
+        raise RuntimeError(f"Could not resolve host: {parsed.hostname}")
+
+    resolved_ips = []
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        ip = str(sockaddr[0]).strip()
+        if not ip:
+            continue
+        resolved_ips.append(ip)
+        if _is_blocked_ip(ip):
+            raise RuntimeError("URL resolves to a private/local address and is blocked.")
+
+    if not resolved_ips:
+        raise RuntimeError("Could not resolve a valid IP for URL host.")
 
 
 def _ocr_with_embedded_images(reader: PdfReader) -> str:
@@ -249,6 +321,7 @@ async def fetch_url_text(url: str) -> Tuple[str, str]:
     """
     Returns (title, text) from a URL with extraction/retry safeguards.
     """
+    await anyio.to_thread.run_sync(lambda: _validate_remote_url_sync(url))
     html = await _download_html(url)
     soup = BeautifulSoup(html, "html.parser")
 

@@ -204,6 +204,9 @@ RL_LOGIN_PER_WINDOW = 12
 _RL: Dict[Tuple[str, str], Deque[float]] = {}
 _RL_MAX_KEYS = 2048
 
+MAX_UPLOAD_MB = max(1, int(os.getenv("OPENSIFT_MAX_UPLOAD_MB", "25")))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
 
 def _rl_bucket(path: str, method: str) -> Optional[Tuple[str, int]]:
     if method != "POST":
@@ -249,6 +252,20 @@ def _rl_check(client: str, bucket: str, limit: int, now: float) -> Tuple[bool, i
 
 def _is_api_path(path: str) -> bool:
     return path.startswith("/chat/")
+
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
+    chunks: List[bytes] = []
+    total = 0
+    while True:
+        part = await file.read(1024 * 1024)
+        if not part:
+            break
+        total += len(part)
+        if total > max_bytes:
+            raise ValueError(f"File exceeds upload limit ({max_bytes} bytes).")
+        chunks.append(part)
+    return b"".join(chunks)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -980,8 +997,8 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             for c in chunks
         ]
 
-        embs = embed_texts(texts)
-        db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+        embs = await anyio.to_thread.run_sync(lambda: embed_texts(texts))
+        await anyio.to_thread.run_sync(lambda: db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs))
 
         assistant_msg = {
             "role": "assistant",
@@ -1028,16 +1045,27 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
     _ensure_owner_loaded(owner)
     t0 = time.perf_counter()
 
-    data = await file.read()
+    try:
+        data = await _read_upload_limited(file, MAX_UPLOAD_BYTES)
+    except ValueError:
+        assistant_msg = {
+            "role": "assistant",
+            "ts": _now(),
+            "text": f"⚠️ File too large. Max allowed is {MAX_UPLOAD_MB} MB.",
+            "sources": [],
+        }
+        CHAT_HISTORY[owner].append(assistant_msg)
+        _persist_owner(owner)
+        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=413)
     filename = file.filename or "upload"
     lower = filename.lower()
 
     if lower.endswith(".pdf"):
         kind = "pdf"
-        text = extract_text_from_pdf(data)
+        text = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf(data))
     elif lower.endswith((".txt", ".md")):
         kind = "text"
-        text = extract_text_from_txt(data)
+        text = await anyio.to_thread.run_sync(lambda: extract_text_from_txt(data))
     else:
         assistant_msg = {
             "role": "assistant",
@@ -1067,8 +1095,8 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
     ids = [c.chunk_id for c in chunks]
     metas = [{"source": filename, "kind": kind, "owner": owner, "start": c.start, "end": c.end} for c in chunks]
 
-    embs = embed_texts(texts)
-    db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+    embs = await anyio.to_thread.run_sync(lambda: embed_texts(texts))
+    await anyio.to_thread.run_sync(lambda: db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs))
     logger.info(
         "ingest_file_success owner=%s filename=%s kind=%s chunks=%d duration_ms=%.2f",
         owner,

@@ -40,6 +40,7 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -r backend/requirements.txt
           python -m pip install sentence-transformers
+          python -m pip install pytest
 
       - name: Verify dependency graph
         run: python -m pip check
@@ -55,3 +56,6 @@ jobs:
           python opensift.py ui -h
           python opensift.py terminal -h
 
+      - name: Run backend tests
+        working-directory: backend
+        run: python -m pytest tests -q
