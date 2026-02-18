@@ -4,9 +4,13 @@ import json
 import os
 import re
 import secrets
+import threading
 from typing import Any, Dict, List, Optional
 
+from app.atomic_io import atomic_write_json, path_lock
+
 DEFAULT_DIR = os.path.join(os.getcwd(), ".opensift_library")
+_LOCK = threading.RLock()
 
 
 def _safe_owner(owner: str) -> str:
@@ -22,14 +26,16 @@ def library_path(owner: str, base_dir: str = DEFAULT_DIR) -> str:
 
 def load_library(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
     path = library_path(owner, base_dir)
-    if not os.path.exists(path):
-        return []
 
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return []
+    with _LOCK, path_lock(path):
+        if not os.path.exists(path):
+            return []
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return []
 
     if not isinstance(data, list):
         return []
@@ -48,9 +54,9 @@ def load_library(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]
 
 def save_library(owner: str, items: List[Dict[str, Any]], base_dir: str = DEFAULT_DIR) -> None:
     path = library_path(owner, base_dir)
-    items = items[-1000:]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(items, f, indent=2, ensure_ascii=False)
+    with _LOCK:
+        trimmed = items[-1000:]
+        atomic_write_json(path, trimmed)
 
 
 def add_item(
@@ -62,19 +68,20 @@ def add_item(
     created_at: str = "",
     base_dir: str = DEFAULT_DIR,
 ) -> Dict[str, Any]:
-    items = load_library(owner, base_dir)
-    item = {
-        "id": secrets.token_urlsafe(9),
-        "owner": owner,
-        "title": (title or "").strip() or "Saved Study Item",
-        "mode": (mode or "").strip(),
-        "text": text,
-        "sources": sources or [],
-        "created_at": created_at,
-    }
-    items.append(item)
-    save_library(owner, items, base_dir)
-    return item
+    with _LOCK:
+        items = load_library(owner, base_dir)
+        item = {
+            "id": secrets.token_urlsafe(9),
+            "owner": owner,
+            "title": (title or "").strip() or "Saved Study Item",
+            "mode": (mode or "").strip(),
+            "text": text,
+            "sources": sources or [],
+            "created_at": created_at,
+        }
+        items.append(item)
+        save_library(owner, items, base_dir)
+        return item
 
 
 def get_item(owner: str, item_id: str, base_dir: str = DEFAULT_DIR) -> Optional[Dict[str, Any]]:
@@ -86,9 +93,10 @@ def get_item(owner: str, item_id: str, base_dir: str = DEFAULT_DIR) -> Optional[
 
 
 def delete_item(owner: str, item_id: str, base_dir: str = DEFAULT_DIR) -> bool:
-    items = load_library(owner, base_dir)
-    kept = [x for x in items if x.get("id") != item_id]
-    if len(kept) == len(items):
-        return False
-    save_library(owner, kept, base_dir)
-    return True
+    with _LOCK:
+        items = load_library(owner, base_dir)
+        kept = [x for x in items if x.get("id") != item_id]
+        if len(kept) == len(items):
+            return False
+        save_library(owner, kept, base_dir)
+        return True

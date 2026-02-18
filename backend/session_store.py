@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from typing import Any, Dict, List
 
+from app.atomic_io import atomic_write_json, path_lock
+
 DEFAULT_DIR = os.path.join(os.getcwd(), ".opensift_sessions")
+_LOCK = threading.RLock()
 
 
 def _safe_owner(owner: str) -> str:
@@ -21,33 +25,34 @@ def session_path(owner: str, base_dir: str = DEFAULT_DIR) -> str:
 
 def load_session(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
     path = session_path(owner, base_dir)
-    if not os.path.exists(path):
-        return []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            # minimal validation
-            out: List[Dict[str, Any]] = []
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                role = item.get("role")
-                text = item.get("text")
-                if role in ("user", "assistant") and isinstance(text, str):
-                    out.append(item)
-            return out
-    except Exception:
-        return []
+    with _LOCK, path_lock(path):
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                # minimal validation
+                out: List[Dict[str, Any]] = []
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    role = item.get("role")
+                    text = item.get("text")
+                    if role in ("user", "assistant") and isinstance(text, str):
+                        out.append(item)
+                return out
+        except Exception:
+            return []
     return []
 
 
 def save_session(owner: str, history: List[Dict[str, Any]], base_dir: str = DEFAULT_DIR) -> None:
     path = session_path(owner, base_dir)
-    # Keep file reasonably sized: last 500 messages
-    history = history[-500:]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2, ensure_ascii=False)
+    with _LOCK:
+        # Keep file reasonably sized: last 500 messages
+        trimmed = history[-500:]
+        atomic_write_json(path, trimmed)
 
 
 def list_sessions(base_dir: str = DEFAULT_DIR) -> List[str]:
@@ -62,7 +67,8 @@ def list_sessions(base_dir: str = DEFAULT_DIR) -> List[str]:
 
 def delete_session(owner: str, base_dir: str = DEFAULT_DIR) -> bool:
     path = session_path(owner, base_dir)
-    if not os.path.exists(path):
-        return False
-    os.remove(path)
-    return True
+    with _LOCK, path_lock(path):
+        if not os.path.exists(path):
+            return False
+        os.remove(path)
+        return True

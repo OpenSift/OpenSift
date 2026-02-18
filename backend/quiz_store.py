@@ -4,9 +4,13 @@ import json
 import os
 import re
 import secrets
+import threading
 from typing import Any, Dict, List
 
+from app.atomic_io import atomic_write_json, path_lock
+
 DEFAULT_DIR = os.path.join(os.getcwd(), ".opensift_quiz_attempts")
+_LOCK = threading.RLock()
 
 
 def _safe_owner(owner: str) -> str:
@@ -22,14 +26,15 @@ def _path(owner: str, base_dir: str = DEFAULT_DIR) -> str:
 
 def load_attempts(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
     path = _path(owner, base_dir)
-    if not os.path.exists(path):
-        return []
+    with _LOCK, path_lock(path):
+        if not os.path.exists(path):
+            return []
 
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return []
 
     if not isinstance(data, list):
         return []
@@ -46,9 +51,9 @@ def load_attempts(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any
 
 def save_attempts(owner: str, attempts: List[Dict[str, Any]], base_dir: str = DEFAULT_DIR) -> None:
     path = _path(owner, base_dir)
-    attempts = attempts[-2000:]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(attempts, f, indent=2, ensure_ascii=False)
+    with _LOCK:
+        trimmed = attempts[-2000:]
+        atomic_write_json(path, trimmed)
 
 
 def add_attempt(
@@ -60,26 +65,28 @@ def add_attempt(
     created_at: str,
     base_dir: str = DEFAULT_DIR,
 ) -> Dict[str, Any]:
-    attempts = load_attempts(owner, base_dir)
-    item = {
-        "id": secrets.token_urlsafe(9),
-        "owner": owner,
-        "title": (title or "").strip() or "Quiz Attempt",
-        "score": int(score),
-        "total": int(total),
-        "pct": round((float(score) / max(1.0, float(total))) * 100.0, 2),
-        "notes": (notes or "").strip(),
-        "created_at": created_at,
-    }
-    attempts.append(item)
-    save_attempts(owner, attempts, base_dir)
-    return item
+    with _LOCK:
+        attempts = load_attempts(owner, base_dir)
+        item = {
+            "id": secrets.token_urlsafe(9),
+            "owner": owner,
+            "title": (title or "").strip() or "Quiz Attempt",
+            "score": int(score),
+            "total": int(total),
+            "pct": round((float(score) / max(1.0, float(total))) * 100.0, 2),
+            "notes": (notes or "").strip(),
+            "created_at": created_at,
+        }
+        attempts.append(item)
+        save_attempts(owner, attempts, base_dir)
+        return item
 
 
 def delete_attempt(owner: str, attempt_id: str, base_dir: str = DEFAULT_DIR) -> bool:
-    attempts = load_attempts(owner, base_dir)
-    kept = [x for x in attempts if x.get("id") != attempt_id]
-    if len(kept) == len(attempts):
-        return False
-    save_attempts(owner, kept, base_dir)
-    return True
+    with _LOCK:
+        attempts = load_attempts(owner, base_dir)
+        kept = [x for x in attempts if x.get("id") != attempt_id]
+        if len(kept) == len(attempts):
+            return False
+        save_attempts(owner, kept, base_dir)
+        return True

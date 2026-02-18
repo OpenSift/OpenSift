@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 from app.logging_utils import configure_logging
 
 logger = configure_logging("opensift.launcher")
+OPENSIFT_VERSION = "1.1.3-alpha"
 
 
 def run_ui(host: str, port: int, reload: bool) -> None:
@@ -424,6 +425,7 @@ def run_setup(skip_key_prompts: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenSift Launcher (UI, Terminal, Gateway)")
+    parser.add_argument("--version", action="version", version=f"OpenSift {OPENSIFT_VERSION}")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_setup = sub.add_parser("setup", help="Interactive setup wizard for keys + launch mode")

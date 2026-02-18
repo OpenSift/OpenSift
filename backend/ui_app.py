@@ -8,10 +8,12 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Deque, DefaultDict, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -26,6 +28,7 @@ from starlette.status import HTTP_303_SEE_OTHER
 from app.chunking import chunk_text
 from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
 from app.llm import embed_texts
+from app.atomic_io import atomic_write_json, path_lock
 from app.logging_utils import configure_logging
 from app.providers import (
     codex_auth_detected,
@@ -60,9 +63,18 @@ os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
+OPENSIFT_VERSION = "1.1.3-alpha"
 
-app = FastAPI(title="OpenSift UI", version="0.6.0")
 logger = configure_logging("opensift.ui")
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    await _print_startup_token()
+    yield
+
+
+app = FastAPI(title="OpenSift UI", version=OPENSIFT_VERSION, lifespan=_app_lifespan)
 
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -71,13 +83,14 @@ db = VectorDB()
 
 # History persisted per owner (loaded on demand)
 CHAT_HISTORY: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+CHAT_HISTORY_LOCK = threading.RLock()
 
 # Default history settings for UI
 DEFAULT_HISTORY_TURNS = 10
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _normalize_owner(owner: str) -> str:
@@ -91,17 +104,52 @@ def _ndjson(obj: Dict[str, Any]) -> bytes:
 
 
 def _ensure_owner_loaded(owner: str) -> None:
-    if owner not in CHAT_HISTORY or not CHAT_HISTORY[owner]:
-        CHAT_HISTORY[owner] = load_session(owner, SESSION_DIR)
+    with CHAT_HISTORY_LOCK:
+        if owner not in CHAT_HISTORY or not CHAT_HISTORY[owner]:
+            CHAT_HISTORY[owner] = load_session(owner, SESSION_DIR)
 
 
-def _persist_owner(owner: str) -> None:
-    save_session(owner, CHAT_HISTORY[owner], SESSION_DIR)
+def _history_snapshot(owner: str) -> List[Dict[str, Any]]:
+    _ensure_owner_loaded(owner)
+    with CHAT_HISTORY_LOCK:
+        return [dict(m) for m in CHAT_HISTORY[owner]]
+
+
+def _history_append(owner: str, msg: Dict[str, Any]) -> None:
+    with CHAT_HISTORY_LOCK:
+        _ensure_owner_loaded(owner)
+        CHAT_HISTORY[owner].append(msg)
+        save_session(owner, CHAT_HISTORY[owner], SESSION_DIR)
+
+
+def _history_extend(owner: str, messages: List[Dict[str, Any]]) -> None:
+    with CHAT_HISTORY_LOCK:
+        _ensure_owner_loaded(owner)
+        CHAT_HISTORY[owner].extend(messages)
+        save_session(owner, CHAT_HISTORY[owner], SESSION_DIR)
+
+
+def _history_replace(owner: str, messages: List[Dict[str, Any]]) -> None:
+    with CHAT_HISTORY_LOCK:
+        CHAT_HISTORY[owner] = list(messages)
+        save_session(owner, CHAT_HISTORY[owner], SESSION_DIR)
+
+
+def _history_clear(owner: str) -> None:
+    with CHAT_HISTORY_LOCK:
+        _ensure_owner_loaded(owner)
+        CHAT_HISTORY[owner].clear()
+        save_session(owner, CHAT_HISTORY[owner], SESSION_DIR)
+
+
+def _history_delete_owner(owner: str) -> None:
+    with CHAT_HISTORY_LOCK:
+        CHAT_HISTORY.pop(owner, None)
 
 
 def _last_generated_assistant(owner: str) -> Optional[Dict[str, Any]]:
-    _ensure_owner_loaded(owner)
-    for msg in reversed(CHAT_HISTORY[owner]):
+    history = _history_snapshot(owner)
+    for msg in reversed(history):
         if msg.get("role") != "assistant":
             continue
         if not isinstance(msg.get("text"), str) or not msg.get("text"):
@@ -386,21 +434,21 @@ def _verify_session_cookie(value: str) -> bool:
 
 
 def _load_auth_state() -> Dict[str, Any]:
-    if not os.path.exists(AUTH_STATE_PATH):
-        return {"has_password": False}
-    try:
-        with open(AUTH_STATE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
+    with path_lock(AUTH_STATE_PATH):
+        if not os.path.exists(AUTH_STATE_PATH):
             return {"has_password": False}
-        return data
-    except Exception:
-        return {"has_password": False}
+        try:
+            with open(AUTH_STATE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return {"has_password": False}
+            return data
+        except Exception:
+            return {"has_password": False}
 
 
 def _save_auth_state(state: Dict[str, Any]) -> None:
-    with open(AUTH_STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    atomic_write_json(AUTH_STATE_PATH, state)
 
 
 def _pbkdf2_hash_password(password: str, salt: bytes, iters: int) -> bytes:
@@ -517,10 +565,10 @@ class CsrfMiddleware(BaseHTTPMiddleware):
 app.add_middleware(CsrfMiddleware)
 
 
-@app.on_event("startup")
 async def _print_startup_token():
     logger.info("OpenSift Local Auth")
-    logger.info("generated_login_token valid_until=restart token=%s", GEN_TOKEN)
+    logger.info("generated_login_token valid_until=restart token_present=true")
+    logger.info("generated_login_token_hint suffix=%s", GEN_TOKEN[-6:])
     logger.info("password_set=%s", "YES" if _has_password() else "NO")
     logger.info("sessions_dir=%s", SESSION_DIR)
     logger.info("study_library_dir=%s", STUDY_DIR)
@@ -747,11 +795,11 @@ async def logout():
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
-    _ensure_owner_loaded(owner)
+    history = _history_snapshot(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
         "chat.html",
-        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner], "csrf_token": csrf_token},
+        {"request": request, "owner": owner, "history": history, "csrf_token": csrf_token},
     )
     _set_csrf_cookie(response, request, csrf_token)
     return response
@@ -760,11 +808,11 @@ async def root(request: Request, owner: str = "default"):
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
-    _ensure_owner_loaded(owner)
+    history = _history_snapshot(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
         "chat.html",
-        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner], "csrf_token": csrf_token},
+        {"request": request, "owner": owner, "history": history, "csrf_token": csrf_token},
     )
     _set_csrf_cookie(response, request, csrf_token)
     return response
@@ -773,8 +821,7 @@ async def chat_page(request: Request, owner: str = "default"):
 @app.post("/chat/clear")
 async def chat_clear(owner: str = Form("default")):
     owner = _normalize_owner(owner)
-    CHAT_HISTORY[owner].clear()
-    _persist_owner(owner)
+    _history_clear(owner)
     return JSONResponse({"ok": True})
 
 
@@ -801,8 +848,7 @@ async def session_list():
 @app.get("/chat/session/export")
 async def session_export(owner: str = "default"):
     owner = _normalize_owner(owner)
-    _ensure_owner_loaded(owner)
-    return JSONResponse({"ok": True, "owner": owner, "history": CHAT_HISTORY[owner]})
+    return JSONResponse({"ok": True, "owner": owner, "history": _history_snapshot(owner)})
 
 
 @app.post("/chat/session/import")
@@ -829,20 +875,17 @@ async def session_import(owner: str = Form("default"), payload: str = Form(...),
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"invalid_payload: {e}"}, status_code=400)
 
-    _ensure_owner_loaded(owner)
     if merge:
-        CHAT_HISTORY[owner].extend(cleaned)
+        _history_extend(owner, cleaned)
     else:
-        CHAT_HISTORY[owner] = cleaned
-    _persist_owner(owner)
-    return JSONResponse({"ok": True, "owner": owner, "count": len(CHAT_HISTORY[owner])})
+        _history_replace(owner, cleaned)
+    return JSONResponse({"ok": True, "owner": owner, "count": len(_history_snapshot(owner))})
 
 
 @app.post("/chat/session/new")
 async def session_new(owner: str = Form("default")):
     owner = _normalize_owner(owner)
-    CHAT_HISTORY[owner] = []
-    _persist_owner(owner)
+    _history_replace(owner, [])
     return JSONResponse({"ok": True, "owner": owner})
 
 
@@ -851,7 +894,7 @@ async def session_delete(owner: str = Form(...)):
     owner = _normalize_owner(owner)
     if not owner:
         return JSONResponse({"ok": False, "error": "owner_required"}, status_code=400)
-    CHAT_HISTORY.pop(owner, None)
+    _history_delete_owner(owner)
     ok = delete_session(owner, SESSION_DIR)
     if not ok:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
@@ -1059,7 +1102,6 @@ async def flashcards_delete(owner: str = Form("default"), card_id: str = Form(..
 @app.post("/chat/ingest/url")
 async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), source_title: str = Form("")):
     owner = _normalize_owner(owner)
-    _ensure_owner_loaded(owner)
     t0 = time.perf_counter()
 
     raw_url = (url or "").strip()
@@ -1070,8 +1112,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "text": "⚠️ URL is required.",
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
     if "://" not in raw_url:
@@ -1085,8 +1126,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "text": "⚠️ Invalid URL format. Please use a full http/https URL.",
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
     try:
@@ -1115,8 +1155,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "text": f"✅ Ingested {len(chunks)} chunks from URL:\n{source}\n{raw_url}",
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         logger.info(
             "ingest_url_success owner=%s source=%s chunks=%d duration_ms=%.2f",
             owner,
@@ -1143,15 +1182,13 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             ),
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
 
 
 @app.post("/chat/ingest/file")
 async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File(...)):
     owner = _normalize_owner(owner)
-    _ensure_owner_loaded(owner)
     t0 = time.perf_counter()
 
     try:
@@ -1163,8 +1200,7 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
             "text": f"⚠️ File too large. Max allowed is {MAX_UPLOAD_MB} MB.",
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=413)
     filename = file.filename or "upload"
     lower = filename.lower()
@@ -1182,8 +1218,7 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
             "text": "⚠️ Unsupported file type. Please upload: .pdf, .txt, or .md",
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     if not text.strip():
@@ -1193,8 +1228,7 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
             "text": f"⚠️ No text extracted from `{filename}`. (If it’s scanned, OCR isn’t enabled yet.)",
             "sources": [],
         }
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         return JSONResponse({"ok": False, "assistant": assistant_msg})
 
     prefix = f"{owner}::{filename}" if owner else filename
@@ -1221,8 +1255,7 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
         "text": f"✅ Ingested {len(chunks)} chunks from file:\n{filename}",
         "sources": [],
     }
-    CHAT_HISTORY[owner].append(assistant_msg)
-    _persist_owner(owner)
+    _history_append(owner, assistant_msg)
 
     return JSONResponse({"ok": True, "assistant": assistant_msg})
 
@@ -1269,8 +1302,7 @@ async def chat_stream(
     async def gen() -> AsyncGenerator[bytes, None]:
         t0 = time.perf_counter()
         user_msg = {"role": "user", "text": msg, "ts": _now()}
-        CHAT_HISTORY[owner].append(user_msg)
-        _persist_owner(owner)
+        _history_append(owner, user_msg)
 
         yield _ndjson({"type": "start", "ts": _now()})
         yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
@@ -1285,8 +1317,7 @@ async def chat_stream(
             logger.exception("chat_stream_retrieval_failed owner=%s", owner)
             yield _ndjson({"type": "error", "message": err})
             assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
-            CHAT_HISTORY[owner].append(assistant_msg)
-            _persist_owner(owner)
+            _history_append(owner, assistant_msg)
             yield _ndjson({"type": "done", "ts": _now()})
             return
 
@@ -1330,9 +1361,10 @@ async def chat_stream(
                 (time.perf_counter() - t0) * 1000.0,
             )
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
-            add_break = should_add_break_reminder(CHAT_HISTORY[owner])
+            history_for_breaks = _history_snapshot(owner)
+            add_break = should_add_break_reminder(history_for_breaks)
             if add_break:
-                reminder = build_break_reminder(CHAT_HISTORY[owner])
+                reminder = build_break_reminder(history_for_breaks)
                 assistant_text = f"{assistant_text}\n\n{reminder}"
             assistant_msg = {
                 "role": "assistant",
@@ -1341,8 +1373,7 @@ async def chat_stream(
                 "sources": [],
                 "break_reminder": add_break,
             }
-            CHAT_HISTORY[owner].append(assistant_msg)
-            _persist_owner(owner)
+            _history_append(owner, assistant_msg)
 
             yield _ndjson({"type": "delta", "text": assistant_text})
             yield _ndjson({"type": "done", "ts": _now()})
@@ -1361,7 +1392,8 @@ async def chat_stream(
         yield _ndjson({"type": "sources", "sources": sources_payload})
 
         # History-aware prompt
-        convo = _build_history_block(CHAT_HISTORY[owner][:-1], history_turns) if history_enabled else ""
+        history_before_response = _history_snapshot(owner)
+        convo = _build_history_block(history_before_response[:-1], history_turns) if history_enabled else ""
         query_for_prompt = f"Conversation so far:\n{convo}\n\nNew question:\n{msg}" if convo else msg
         study_style = get_global_style()
         logger.info("chat_stream_style owner=%s style_chars=%d", owner, len(study_style))
@@ -1437,14 +1469,14 @@ async def chat_stream(
             "provider": provider,
             "model": model,
         }
-        add_break = should_add_break_reminder(CHAT_HISTORY[owner])
+        history_for_breaks = _history_snapshot(owner)
+        add_break = should_add_break_reminder(history_for_breaks)
         if add_break:
-            reminder = build_break_reminder(CHAT_HISTORY[owner])
+            reminder = build_break_reminder(history_for_breaks)
             assistant_msg["text"] = f"{assistant_text}\n\n{reminder}"
             assistant_msg["break_reminder"] = True
             yield _ndjson({"type": "delta", "text": f"\n\n{reminder}"})
-        CHAT_HISTORY[owner].append(assistant_msg)
-        _persist_owner(owner)
+        _history_append(owner, assistant_msg)
         logger.info(
             "chat_stream_done owner=%s passages=%d response_chars=%d duration_ms=%.2f",
             owner,

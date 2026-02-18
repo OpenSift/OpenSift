@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
 MAX_URL_RETRIES = 3
+MAX_URL_REDIRECTS = max(0, int(os.getenv("OPENSIFT_MAX_URL_REDIRECTS", "5")))
 URL_TIMEOUT = httpx.Timeout(40.0, connect=15.0)
 MAX_ARTICLE_CHARS = 350_000
 MIN_EXTRACTED_CHARS = 500
@@ -201,6 +202,21 @@ def _validate_remote_url_sync(url: str) -> None:
         raise RuntimeError("Could not resolve a valid IP for URL host.")
 
 
+def _is_redirect_status(status_code: int) -> bool:
+    return status_code in (301, 302, 303, 307, 308)
+
+
+def _resolve_redirect_url(current_url: str, location: str) -> str:
+    loc = (location or "").strip()
+    if not loc:
+        raise RuntimeError("Redirect response missing Location header.")
+    target = httpx.URL(current_url).join(loc)
+    parsed = urlparse(str(target))
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError("Redirected to unsupported URL scheme.")
+    return str(target)
+
+
 def _ocr_with_embedded_images(reader: PdfReader) -> str:
     try:
         from PIL import Image  # type: ignore
@@ -298,30 +314,54 @@ async def _download_html(url: str) -> str:
         "User-Agent": "Mozilla/5.0 (compatible; OpenSift/0.7; +study-tool)",
         "Accept": "text/html,application/xhtml+xml",
     }
-
+    current_url = (url or "").strip()
+    seen_urls = set()
+    redirects = 0
     last_err: Optional[Exception] = None
-    async with httpx.AsyncClient(follow_redirects=True, timeout=URL_TIMEOUT) as client:
-        for attempt in range(1, MAX_URL_RETRIES + 1):
-            try:
-                r = await client.get(url, headers=headers)
-                r.raise_for_status()
-                return r.text
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as e:
-                last_err = e
-                if attempt >= MAX_URL_RETRIES:
-                    break
-                await asyncio.sleep(0.35 * attempt)
 
-    if last_err:
-        raise last_err
-    raise RuntimeError("Unknown URL fetch error")
+    async with httpx.AsyncClient(follow_redirects=False, timeout=URL_TIMEOUT) as client:
+        while True:
+            if current_url in seen_urls:
+                raise RuntimeError("Redirect loop detected.")
+            seen_urls.add(current_url)
+
+            await anyio.to_thread.run_sync(lambda: _validate_remote_url_sync(current_url))
+
+            response: Optional[httpx.Response] = None
+            for attempt in range(1, MAX_URL_RETRIES + 1):
+                try:
+                    response = await client.get(current_url, headers=headers)
+                    break
+                except (httpx.TimeoutException, httpx.NetworkError) as e:
+                    last_err = e
+                    if attempt >= MAX_URL_RETRIES:
+                        break
+                    await asyncio.sleep(0.35 * attempt)
+
+            if response is None:
+                if last_err:
+                    raise last_err
+                raise RuntimeError("Unknown URL fetch error")
+
+            if _is_redirect_status(response.status_code):
+                if redirects >= MAX_URL_REDIRECTS:
+                    raise RuntimeError(f"Too many redirects (>{MAX_URL_REDIRECTS}).")
+                current_url = _resolve_redirect_url(str(response.url), response.headers.get("location", ""))
+                redirects += 1
+                continue
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                last_err = e
+                raise
+            return response.text
 
 
 async def fetch_url_text(url: str) -> Tuple[str, str]:
     """
     Returns (title, text) from a URL with extraction/retry safeguards.
     """
-    await anyio.to_thread.run_sync(lambda: _validate_remote_url_sync(url))
     html = await _download_html(url)
     soup = BeautifulSoup(html, "html.parser")
 

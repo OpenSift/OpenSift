@@ -4,10 +4,14 @@ import json
 import os
 import re
 import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from app.atomic_io import atomic_write_json, path_lock
+
 DEFAULT_DIR = os.path.join(os.getcwd(), ".opensift_flashcards")
+_LOCK = threading.RLock()
 
 
 def _safe_owner(owner: str) -> str:
@@ -40,14 +44,15 @@ def _parse_iso(value: str) -> Optional[datetime]:
 
 def load_cards(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
     path = _path(owner, base_dir)
-    if not os.path.exists(path):
-        return []
+    with _LOCK, path_lock(path):
+        if not os.path.exists(path):
+            return []
 
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return []
 
     if not isinstance(data, list):
         return []
@@ -68,38 +73,40 @@ def load_cards(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
 
 def save_cards(owner: str, cards: List[Dict[str, Any]], base_dir: str = DEFAULT_DIR) -> None:
     path = _path(owner, base_dir)
-    cards = cards[-5000:]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cards, f, indent=2, ensure_ascii=False)
+    with _LOCK:
+        trimmed = cards[-5000:]
+        atomic_write_json(path, trimmed)
 
 
 def add_card(owner: str, front: str, back: str, tags: str, created_at: str, base_dir: str = DEFAULT_DIR) -> Dict[str, Any]:
-    cards = load_cards(owner, base_dir)
-    item = {
-        "id": secrets.token_urlsafe(9),
-        "owner": owner,
-        "front": front.strip(),
-        "back": back.strip(),
-        "tags": tags.strip(),
-        "created_at": created_at,
-        "last_reviewed_at": "",
-        "due_at": created_at,
-        "interval_days": 0,
-        "ease": 2.5,
-        "streak": 0,
-    }
-    cards.append(item)
-    save_cards(owner, cards, base_dir)
-    return item
+    with _LOCK:
+        cards = load_cards(owner, base_dir)
+        item = {
+            "id": secrets.token_urlsafe(9),
+            "owner": owner,
+            "front": front.strip(),
+            "back": back.strip(),
+            "tags": tags.strip(),
+            "created_at": created_at,
+            "last_reviewed_at": "",
+            "due_at": created_at,
+            "interval_days": 0,
+            "ease": 2.5,
+            "streak": 0,
+        }
+        cards.append(item)
+        save_cards(owner, cards, base_dir)
+        return item
 
 
 def delete_card(owner: str, card_id: str, base_dir: str = DEFAULT_DIR) -> bool:
-    cards = load_cards(owner, base_dir)
-    kept = [x for x in cards if x.get("id") != card_id]
-    if len(kept) == len(cards):
-        return False
-    save_cards(owner, kept, base_dir)
-    return True
+    with _LOCK:
+        cards = load_cards(owner, base_dir)
+        kept = [x for x in cards if x.get("id") != card_id]
+        if len(kept) == len(cards):
+            return False
+        save_cards(owner, kept, base_dir)
+        return True
 
 
 def due_cards(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
@@ -114,48 +121,49 @@ def due_cards(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:
 
 
 def review_card(owner: str, card_id: str, rating: str, reviewed_at: str, base_dir: str = DEFAULT_DIR) -> Optional[Dict[str, Any]]:
-    cards = load_cards(owner, base_dir)
-    idx = -1
-    for i, c in enumerate(cards):
-        if c.get("id") == card_id:
-            idx = i
-            break
-    if idx < 0:
-        return None
+    with _LOCK:
+        cards = load_cards(owner, base_dir)
+        idx = -1
+        for i, c in enumerate(cards):
+            if c.get("id") == card_id:
+                idx = i
+                break
+        if idx < 0:
+            return None
 
-    card = cards[idx]
-    interval = int(card.get("interval_days") or 0)
-    ease = float(card.get("ease") or 2.5)
-    streak = int(card.get("streak") or 0)
+        card = cards[idx]
+        interval = int(card.get("interval_days") or 0)
+        ease = float(card.get("ease") or 2.5)
+        streak = int(card.get("streak") or 0)
 
-    r = (rating or "").strip().lower()
-    if r == "again":
-        interval = 1
-        ease = max(1.3, ease - 0.2)
-        streak = 0
-    elif r == "hard":
-        interval = max(1, int(round((interval or 1) * 1.2)))
-        ease = max(1.3, ease - 0.15)
-        streak += 1
-    elif r == "easy":
-        base = interval or 1
-        interval = max(2, int(round(base * (ease + 0.25))))
-        ease = min(3.2, ease + 0.15)
-        streak += 1
-    else:
-        base = interval or 1
-        interval = max(1, int(round(base * ease)))
-        streak += 1
+        r = (rating or "").strip().lower()
+        if r == "again":
+            interval = 1
+            ease = max(1.3, ease - 0.2)
+            streak = 0
+        elif r == "hard":
+            interval = max(1, int(round((interval or 1) * 1.2)))
+            ease = max(1.3, ease - 0.15)
+            streak += 1
+        elif r == "easy":
+            base = interval or 1
+            interval = max(2, int(round(base * (ease + 0.25))))
+            ease = min(3.2, ease + 0.15)
+            streak += 1
+        else:
+            base = interval or 1
+            interval = max(1, int(round(base * ease)))
+            streak += 1
 
-    reviewed_dt = _parse_iso(reviewed_at) or _now_dt()
-    due_dt = reviewed_dt + timedelta(days=interval)
+        reviewed_dt = _parse_iso(reviewed_at) or _now_dt()
+        due_dt = reviewed_dt + timedelta(days=interval)
 
-    card["last_reviewed_at"] = _iso(reviewed_dt)
-    card["due_at"] = _iso(due_dt)
-    card["interval_days"] = interval
-    card["ease"] = round(ease, 3)
-    card["streak"] = streak
+        card["last_reviewed_at"] = _iso(reviewed_dt)
+        card["due_at"] = _iso(due_dt)
+        card["interval_days"] = interval
+        card["ease"] = round(ease, 3)
+        card["streak"] = streak
 
-    cards[idx] = card
-    save_cards(owner, cards, base_dir)
-    return card
+        cards[idx] = card
+        save_cards(owner, cards, base_dir)
+        return card

@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from app.atomic_io import atomic_write_json, path_lock
 
 DEFAULT_ENABLED = True
 DEFAULT_EVERY_USER_MSGS = 6
 DEFAULT_MIN_MINUTES = 45
 WELLNESS_SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".opensift", "wellness.json")
+_LOCK = threading.RLock()
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -37,24 +41,21 @@ def _settings_path() -> str:
 
 def _load_settings_file() -> Dict[str, Any]:
     p = _settings_path()
-    if not os.path.exists(p):
-        return {}
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    with _LOCK, path_lock(p):
+        if not os.path.exists(p):
+            return {}
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
 
 
 def _save_settings_file(data: Dict[str, Any]) -> None:
     p = _settings_path()
-    parent = os.path.dirname(p)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with _LOCK:
+        atomic_write_json(p, data)
 
 
 def get_wellness_settings() -> Dict[str, Any]:
