@@ -41,6 +41,10 @@ Preferred workflow:
 - Atomic, lock-guarded JSON persistence for local stores.
 - Regression tests for XSS template safety, CSRF fetch usage, ingest safety, and auth/session/streaming flows.
 
+## Fixed Advisories
+Previously fixed issues are documented in:
+- `docs/security-advisories.md`
+
 ## Known Limitations
 - Deployment assumptions remain local/dev-first.
 - Session signing secrets are process-ephemeral by default.
@@ -51,4 +55,3 @@ Preferred workflow:
 - Do not run with high-privilege credentials.
 - Rotate provider tokens if you suspect exposure.
 - Keep dependencies updated.
-

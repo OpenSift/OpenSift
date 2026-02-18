@@ -59,5 +59,5 @@ python opensift.py ui --reload
 ## Key Docs
 - [Release Notes](release-notes.md)
 - [Security and Hardening](security-and-hardening.md)
+- [Security Advisories](security-advisories.md)
 - [Main README](../README.md)
-
