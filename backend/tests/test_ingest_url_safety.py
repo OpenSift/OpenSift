@@ -25,7 +25,7 @@ def test_validate_remote_url_blocks_private_dns_resolution(monkeypatch: pytest.M
 
 
 def test_validate_remote_url_blocks_private_ip_literal() -> None:
-    with pytest.raises(RuntimeError, match="private/local"):
+    with pytest.raises(RuntimeError, match=r"(?i)private/local"):
         _validate_remote_url_sync("http://10.1.2.3")
 
 

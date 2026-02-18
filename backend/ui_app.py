@@ -192,6 +192,19 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(AccessLogMiddleware)
 
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 # -----------------------------------------------------------------------------
 # Rate limiting (in-memory sliding window)
 # -----------------------------------------------------------------------------
@@ -206,6 +219,10 @@ _RL_MAX_KEYS = 2048
 
 MAX_UPLOAD_MB = max(1, int(os.getenv("OPENSIFT_MAX_UPLOAD_MB", "25")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_CHAT_MESSAGE_CHARS = max(256, int(os.getenv("OPENSIFT_MAX_CHAT_MESSAGE_CHARS", "8000")))
+MAX_SESSION_IMPORT_CHARS = max(1024, int(os.getenv("OPENSIFT_MAX_SESSION_IMPORT_CHARS", "2000000")))
+MAX_HISTORY_TURNS = max(1, int(os.getenv("OPENSIFT_MAX_HISTORY_TURNS", "30")))
+MAX_RETRIEVAL_K = max(1, int(os.getenv("OPENSIFT_MAX_RETRIEVAL_K", "20")))
 
 
 def _rl_bucket(path: str, method: str) -> Optional[Tuple[str, int]]:
@@ -266,6 +283,18 @@ async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
             raise ValueError(f"File exceeds upload limit ({max_bytes} bytes).")
         chunks.append(part)
     return b"".join(chunks)
+
+
+def _sanitize_post_params(mode: str, provider: str, k: int, history_turns: int) -> Tuple[str, str, int, int]:
+    mode_clean = (mode or "study_guide").strip().lower()
+    provider_clean = (provider or "claude_code").strip().lower()
+    if mode_clean not in ("study_guide", "key_points", "quiz", "explain"):
+        raise ValueError("invalid_mode")
+    if provider_clean not in ("openai", "claude", "claude_code", "codex"):
+        raise ValueError("invalid_provider")
+    k_clean = max(1, min(int(k), MAX_RETRIEVAL_K))
+    turns_clean = max(0, min(int(history_turns), MAX_HISTORY_TURNS))
+    return mode_clean, provider_clean, k_clean, turns_clean
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -434,6 +463,59 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(AuthMiddleware)
 
+# -----------------------------------------------------------------------------
+# CSRF protection (double-submit cookie + custom header)
+# -----------------------------------------------------------------------------
+CSRF_COOKIE_NAME = "opensift_csrf"
+CSRF_HEADER_NAME = "x-csrf-token"
+CSRF_EXEMPT_PATHS = {"/health", "/login", "/set-password"}
+CSRF_EXEMPT_PREFIXES = ("/static",)
+
+
+def _csrf_token_for_request(request: Request) -> str:
+    current = (request.cookies.get(CSRF_COOKIE_NAME) or "").strip()
+    if current:
+        return current
+    return secrets.token_urlsafe(32)
+
+
+def _set_csrf_cookie(response: Any, request: Request, token: str) -> None:
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=(request.url.scheme == "https"),
+        max_age=AUTH_TTL_SECONDS,
+    )
+
+
+def _csrf_invalid(request: Request) -> bool:
+    cookie_token = (request.cookies.get(CSRF_COOKIE_NAME) or "").strip()
+    header_token = (request.headers.get(CSRF_HEADER_NAME) or "").strip()
+    if not cookie_token or not header_token:
+        return True
+    return not secrets.compare_digest(cookie_token, header_token)
+
+
+class CsrfMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        method = request.method.upper()
+        path = request.url.path
+        if method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return await call_next(request)
+        if path in CSRF_EXEMPT_PATHS or any(path.startswith(p) for p in CSRF_EXEMPT_PREFIXES):
+            return await call_next(request)
+        if _csrf_invalid(request):
+            msg = "CSRF validation failed."
+            if _is_api_path(path):
+                return JSONResponse({"ok": False, "error": "csrf_failed", "message": msg}, status_code=403)
+            return PlainTextResponse(msg, status_code=403)
+        return await call_next(request)
+
+
+app.add_middleware(CsrfMiddleware)
+
 
 @app.on_event("startup")
 async def _print_startup_token():
@@ -525,10 +607,12 @@ async def health():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "login.html",
         {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
+    _set_csrf_cookie(response, request, _csrf_token_for_request(request))
+    return response
 
 
 @app.post("/login")
@@ -543,7 +627,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
         ok = True
 
     if not ok:
-        return templates.TemplateResponse(
+        response = templates.TemplateResponse(
             "login.html",
             {
                 "request": request,
@@ -554,6 +638,8 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
             },
             status_code=401,
         )
+        _set_csrf_cookie(response, request, _csrf_token_for_request(request))
+        return response
 
     resp = RedirectResponse(url="/chat", status_code=HTTP_303_SEE_OTHER)
     resp.set_cookie(
@@ -561,7 +647,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
         _make_session_cookie(),
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=(request.url.scheme == "https"),
         max_age=AUTH_TTL_SECONDS,
     )
     return resp
@@ -569,10 +655,12 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 
 @app.get("/set-password", response_class=HTMLResponse)
 async def set_password_page(request: Request):
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         "login.html",
         {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
+    _set_csrf_cookie(response, request, _csrf_token_for_request(request))
+    return response
 
 
 @app.post("/set-password")
@@ -587,7 +675,7 @@ async def set_password_submit(
     confirm_password = (confirm_password or "").strip()
 
     if not secrets.compare_digest(token, GEN_TOKEN):
-        return templates.TemplateResponse(
+        response = templates.TemplateResponse(
             "login.html",
             {
                 "request": request,
@@ -598,9 +686,11 @@ async def set_password_submit(
             },
             status_code=401,
         )
+        _set_csrf_cookie(response, request, _csrf_token_for_request(request))
+        return response
 
     if len(new_password) < 8:
-        return templates.TemplateResponse(
+        response = templates.TemplateResponse(
             "login.html",
             {
                 "request": request,
@@ -611,9 +701,11 @@ async def set_password_submit(
             },
             status_code=400,
         )
+        _set_csrf_cookie(response, request, _csrf_token_for_request(request))
+        return response
 
     if new_password != confirm_password:
-        return templates.TemplateResponse(
+        response = templates.TemplateResponse(
             "login.html",
             {
                 "request": request,
@@ -624,6 +716,8 @@ async def set_password_submit(
             },
             status_code=400,
         )
+        _set_csrf_cookie(response, request, _csrf_token_for_request(request))
+        return response
 
     _set_password(new_password)
 
@@ -633,7 +727,7 @@ async def set_password_submit(
         _make_session_cookie(),
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=(request.url.scheme == "https"),
         max_age=AUTH_TTL_SECONDS,
     )
     return resp
@@ -643,6 +737,7 @@ async def set_password_submit(
 async def logout():
     resp = RedirectResponse(url="/login", status_code=HTTP_303_SEE_OTHER)
     resp.delete_cookie(AUTH_COOKIE_NAME)
+    resp.delete_cookie(CSRF_COOKIE_NAME)
     return resp
 
 
@@ -653,14 +748,26 @@ async def logout():
 async def root(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
-    return templates.TemplateResponse("chat.html", {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]})
+    csrf_token = _csrf_token_for_request(request)
+    response = templates.TemplateResponse(
+        "chat.html",
+        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner], "csrf_token": csrf_token},
+    )
+    _set_csrf_cookie(response, request, csrf_token)
+    return response
 
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     _ensure_owner_loaded(owner)
-    return templates.TemplateResponse("chat.html", {"request": request, "owner": owner, "history": CHAT_HISTORY[owner]})
+    csrf_token = _csrf_token_for_request(request)
+    response = templates.TemplateResponse(
+        "chat.html",
+        {"request": request, "owner": owner, "history": CHAT_HISTORY[owner], "csrf_token": csrf_token},
+    )
+    _set_csrf_cookie(response, request, csrf_token)
+    return response
 
 
 @app.post("/chat/clear")
@@ -705,6 +812,8 @@ async def session_import(owner: str = Form("default"), payload: str = Form(...),
     merge: if true, append; else replace
     """
     owner = _normalize_owner(owner)
+    if len((payload or "").strip()) > MAX_SESSION_IMPORT_CHARS:
+        return JSONResponse({"ok": False, "error": "payload_too_large"}, status_code=413)
     try:
         data = json.loads(payload)
         if not isinstance(data, list):
@@ -1133,6 +1242,19 @@ async def chat_stream(
     history_enabled: bool = Form(True),
 ):
     owner = _normalize_owner(owner)
+    msg = (message or "").strip()
+    if not msg:
+        return JSONResponse({"ok": False, "error": "empty_message"}, status_code=400)
+    if len(msg) > MAX_CHAT_MESSAGE_CHARS:
+        return JSONResponse(
+            {"ok": False, "error": "message_too_large", "message": f"Max message length is {MAX_CHAT_MESSAGE_CHARS} characters."},
+            status_code=413,
+        )
+    try:
+        mode, provider, k, history_turns = _sanitize_post_params(mode, provider, k, history_turns)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
     _ensure_owner_loaded(owner)
     logger.info(
         "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s",
@@ -1140,13 +1262,13 @@ async def chat_stream(
         mode,
         provider,
         model,
-        int(k),
+        k,
         history_enabled,
     )
 
     async def gen() -> AsyncGenerator[bytes, None]:
         t0 = time.perf_counter()
-        user_msg = {"role": "user", "text": message, "ts": _now()}
+        user_msg = {"role": "user", "text": msg, "ts": _now()}
         CHAT_HISTORY[owner].append(user_msg)
         _persist_owner(owner)
 
@@ -1155,9 +1277,9 @@ async def chat_stream(
 
         # Retrieve
         try:
-            q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([message])[0])
+            q_emb = await anyio.to_thread.run_sync(lambda: embed_texts([msg])[0])
             owner_where = {"owner": owner} if owner else None
-            res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=int(k), where=owner_where))
+            res = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=k, where=owner_where))
         except Exception as e:
             err = f"Retrieval failed: {e}"
             logger.exception("chat_stream_retrieval_failed owner=%s", owner)
@@ -1185,7 +1307,7 @@ async def chat_stream(
         # and apply owner filtering locally. This avoids false negatives on some DB filter paths.
         if owner and not results:
             try:
-                res2 = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=max(int(k) * 3, 24), where=None))
+                res2 = await anyio.to_thread.run_sync(lambda: db.query(q_emb, k=max(k * 3, 24), where=None))
                 docs2 = res2.get("documents", [[]])[0]
                 metas2 = res2.get("metadatas", [[]])[0]
                 dists2 = res2.get("distances", [[]])[0]
@@ -1195,7 +1317,7 @@ async def chat_stream(
                         continue
                     results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
                     passages.append({"text": docs2[i], "meta": metas2[i]})
-                    if len(results) >= int(k):
+                    if len(results) >= k:
                         break
             except Exception:
                 pass
@@ -1204,7 +1326,7 @@ async def chat_stream(
             logger.info(
                 "chat_stream_no_results owner=%s k=%d duration_ms=%.2f",
                 owner,
-                int(k),
+                k,
                 (time.perf_counter() - t0) * 1000.0,
             )
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
@@ -1239,8 +1361,8 @@ async def chat_stream(
         yield _ndjson({"type": "sources", "sources": sources_payload})
 
         # History-aware prompt
-        convo = _build_history_block(CHAT_HISTORY[owner][:-1], int(history_turns)) if history_enabled else ""
-        query_for_prompt = f"Conversation so far:\n{convo}\n\nNew question:\n{message}" if convo else message
+        convo = _build_history_block(CHAT_HISTORY[owner][:-1], history_turns) if history_enabled else ""
+        query_for_prompt = f"Conversation so far:\n{convo}\n\nNew question:\n{msg}" if convo else msg
         study_style = get_global_style()
         logger.info("chat_stream_style owner=%s style_chars=%d", owner, len(study_style))
         prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages, study_style=study_style)

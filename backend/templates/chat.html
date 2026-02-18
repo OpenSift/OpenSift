@@ -431,7 +431,7 @@
       }
     </style>
   </head>
-  <body>
+  <body data-csrf="{{ csrf_token }}">
     <div class="app">
       <aside class="sidebar">
         <div class="sb-head">
@@ -656,9 +656,15 @@
       const flashcardList = document.getElementById("flashcardList");
 
       const busy = document.getElementById("busy");
+      const csrfToken = document.body.dataset.csrf || "";
 
       function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
       function setBusy(on) { busy.classList.toggle("on", !!on); }
+      function csrfFetch(url, options = {}) {
+        const headers = new Headers(options.headers || {});
+        headers.set("X-CSRF-Token", csrfToken);
+        return fetch(url, { ...options, headers });
+      }
 
       function owner() {
         const raw = ownerEl.value.trim() || "default";
@@ -682,7 +688,7 @@
       async function saveSoulStyle() {
         const form = new FormData();
         form.append("style", (soulStyleEl.value || "").trim());
-        const res = await fetch("/chat/soul/set", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/soul/set", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
         const data = await res.json();
@@ -722,7 +728,7 @@
         form.append("every_user_msgs", String(every));
         form.append("min_minutes", String(mins));
 
-        const res = await fetch("/chat/wellness/set", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/wellness/set", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
         const data = await res.json();
@@ -834,7 +840,7 @@
         form.append("provider", providerEl.value);
         form.append("k", kEl.value);
 
-        const res = await fetch("/chat/stream", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/stream", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
 
         if (!res.ok || !res.body) {
@@ -887,7 +893,7 @@
           form.append("url", url);
           form.append("source_title", ingestTitleEl.value.trim());
 
-          const res = await fetch("/chat/ingest/url", { method: "POST", body: form });
+          const res = await csrfFetch("/chat/ingest/url", { method: "POST", body: form });
           if (!(await ensureAuth(res))) return;
 
           let data = null;
@@ -919,7 +925,7 @@
         form.append("owner", o);
         form.append("file", file);
 
-        const res = await fetch("/chat/ingest/file", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/ingest/file", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
 
         const data = await res.json();
@@ -932,14 +938,14 @@
       async function clearChat() {
         const form = new FormData();
         form.append("owner", owner());
-        const res = await fetch("/chat/clear", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/clear", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         chat.innerHTML = "";
         await loadSessions();
       }
 
       async function logout() {
-        await fetch("/logout", { method: "POST" });
+        await csrfFetch("/logout", { method: "POST" });
         window.location.href = "/login";
       }
 
@@ -1001,7 +1007,7 @@
       async function deleteSessionByOwner(ownerName) {
         const form = new FormData();
         form.append("owner", ownerName);
-        const res = await fetch("/chat/session/delete", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/session/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
 
         if (owner() === ownerName) {
@@ -1016,7 +1022,7 @@
 
         const form = new FormData();
         form.append("owner", nextOwner);
-        const res = await fetch("/chat/session/new", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/session/new", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
 
         newChatNameEl.value = "";
@@ -1091,7 +1097,7 @@
         const form = new FormData();
         form.append("owner", owner());
         form.append("item_id", itemId);
-        const res = await fetch("/chat/study/delete", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/study/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
 
         await loadStudyLibrary();
@@ -1106,7 +1112,7 @@
         form.append("owner", o);
         form.append("title", title.trim());
 
-        const res = await fetch("/chat/study/save-last", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/study/save-last", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
 
         if (!res.ok) {
@@ -1177,7 +1183,7 @@
         form.append("total", String(total));
         form.append("notes", quizNotesEl.value.trim());
 
-        const res = await fetch("/chat/quiz/add", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/quiz/add", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
 
@@ -1192,7 +1198,7 @@
         const form = new FormData();
         form.append("owner", owner());
         form.append("attempt_id", attemptId);
-        const res = await fetch("/chat/quiz/delete", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/quiz/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         await loadQuizHistory();
       }
@@ -1275,7 +1281,7 @@
         form.append("back", back);
         form.append("tags", fcTagsEl.value.trim());
 
-        const res = await fetch("/chat/flashcards/add", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/flashcards/add", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
 
@@ -1290,7 +1296,7 @@
         form.append("owner", owner());
         form.append("card_id", cardId);
         form.append("rating", rating);
-        const res = await fetch("/chat/flashcards/review", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/flashcards/review", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         await loadFlashcards();
       }
@@ -1299,7 +1305,7 @@
         const form = new FormData();
         form.append("owner", owner());
         form.append("card_id", cardId);
-        const res = await fetch("/chat/flashcards/delete", { method: "POST", body: form });
+        const res = await csrfFetch("/chat/flashcards/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
         await loadFlashcards();
       }
