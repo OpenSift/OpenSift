@@ -507,13 +507,15 @@ def _sanitize_post_params(mode: str, provider: str, k: int, history_turns: int) 
 def _preferred_provider_default() -> str:
     if claude_code_cli_available():
         return "claude_code"
-    if codex_auth_detected() and codex_cli_available():
-        return "codex"
     if os.getenv("ANTHROPIC_API_KEY", "").strip():
         return "claude"
+    if codex_auth_detected() and codex_cli_available():
+        return "codex"
     if os.getenv("OPENAI_API_KEY", "").strip():
         return "openai"
-    return "claude"
+    if os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
+        return "claude_code"
+    return "claude_code"
 
 
 def _provider_runtime_caps() -> Dict[str, Any]:
@@ -2511,7 +2513,7 @@ async def chat_stream(
             return
         except Exception as e:
             logger.exception("chat_stream_generation_failed owner=%s provider=%s", owner, provider)
-            context_answer = _context_only_answer(query, results)
+            context_answer = _context_only_answer(msg, results)
             active_model = (model or "").strip() or "auto"
             assistant_text = (
                 f"⚠️ Generation failed ({e}).\n\n"
@@ -2528,7 +2530,7 @@ async def chat_stream(
                 "⚠️ Generation returned empty output from the selected provider.\n\n"
                 f"Requested provider/model: {requested_provider or 'auto'} / {requested_model or 'auto'}\n"
                 f"Active provider/model: {provider or 'auto'} / {active_model}\n\n"
-                f"{_context_only_answer(query, results)}"
+                f"{_context_only_answer(msg, results)}"
             )
             yield _ndjson({"type": "delta", "text": assistant_text})
 
