@@ -11,12 +11,14 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.logging_utils import configure_logging
+from app.security_audit import format_audit_report, run_security_audit
 
 logger = configure_logging("opensift.launcher")
-OPENSIFT_VERSION = "1.1.3-alpha"
+OPENSIFT_VERSION = "1.2.0-alpha"
 
 
 def run_ui(host: str, port: int, reload: bool) -> None:
@@ -323,7 +325,15 @@ def _run_both(host: str, port: int, reload: bool, term_args: list[str]) -> None:
             ui_proc.kill()
 
 
-def run_setup(skip_key_prompts: bool = False) -> None:
+def run_security_audit_cmd(fix_perms: bool = False, fail_on_warn: bool = False) -> int:
+    findings, rc = run_security_audit(Path(os.getcwd()), fix_perms=fix_perms)
+    print("\n" + format_audit_report(findings) + "\n")
+    if rc == 2 and not fail_on_warn:
+        return 0
+    return 1 if rc != 0 else 0
+
+
+def run_setup(skip_key_prompts: bool = False, no_launch: bool = False) -> None:
     env_path = os.path.join(os.getcwd(), ".env")
     env_data = _parse_env_file(env_path)
 
@@ -371,6 +381,17 @@ def run_setup(skip_key_prompts: bool = False) -> None:
         print("\n⚠️ Codex command validation warning:")
         print(f"   '{codex_cmd}' appears to be the unrelated npm 'codex' package (site generator).")
         print("   Install the ChatGPT Codex CLI and set OPENSIFT_CODEX_CMD to the correct executable.")
+
+    print("\nRunning security audit before launch...")
+    audit_rc = run_security_audit_cmd(fix_perms=True, fail_on_warn=False)
+    if audit_rc != 0:
+        print("⚠️ Security audit reported remaining high-severity findings. Please resolve before launch.")
+        if _prompt_choice("Continue anyway", ["y", "n"], default="n") != "y":
+            raise SystemExit(1)
+
+    if no_launch:
+        print("Setup complete (launch skipped).")
+        return
 
     print("\nLaunch mode options:")
     print("  - ui       : Web chatbot (FastAPI UI)")
@@ -434,6 +455,15 @@ def main() -> None:
         action="store_true",
         help="Skip key/token prompts and use existing values from .env",
     )
+    p_setup.add_argument(
+        "--no-launch",
+        action="store_true",
+        help="Run setup and security audit, then exit without launching services",
+    )
+
+    p_audit = sub.add_parser("security-audit", help="Run local security audit checks for OpenSift setup")
+    p_audit.add_argument("--fix-perms", action="store_true", help="Auto-fix restrictive file/dir permissions when possible")
+    p_audit.add_argument("--fail-on-warn", action="store_true", help="Return non-zero when warnings are found")
 
     p_ui = sub.add_parser("ui", help="Run localhost web UI")
     p_ui.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
@@ -449,6 +479,9 @@ def main() -> None:
     p_term.add_argument("--wrap", type=int, default=100, help="Wrap width")
     p_term.add_argument("--history-turns", type=int, default=10, help="How many messages to include as history")
     p_term.add_argument("--no-stream", action="store_true", help="Disable streaming output")
+    p_term.add_argument("--no-true-stream", action="store_true", help="Disable provider-native true streaming")
+    p_term.add_argument("--no-show-thinking", action="store_true", help="Hide retrieval/thinking status lines")
+    p_term.add_argument("--thinking", action="store_true", help="Enable Claude extended thinking where supported")
     p_term.add_argument("--no-sources", action="store_true", help="Disable sources printing")
 
     p_gateway = sub.add_parser("gateway", help="Run supervised OpenSift gateway (UI + optional MCP)")
@@ -464,8 +497,28 @@ def main() -> None:
     os.chdir(this_dir)
 
     if args.cmd == "setup":
-        logger.info("launcher_cmd setup skip_key_prompts=%s", bool(getattr(args, "skip_key_prompts", False)))
-        run_setup(skip_key_prompts=bool(getattr(args, "skip_key_prompts", False)))
+        logger.info(
+            "launcher_cmd setup skip_key_prompts=%s no_launch=%s",
+            bool(getattr(args, "skip_key_prompts", False)),
+            bool(getattr(args, "no_launch", False)),
+        )
+        run_setup(
+            skip_key_prompts=bool(getattr(args, "skip_key_prompts", False)),
+            no_launch=bool(getattr(args, "no_launch", False)),
+        )
+        return
+
+    if args.cmd == "security-audit":
+        logger.info(
+            "launcher_cmd security_audit fix_perms=%s fail_on_warn=%s",
+            bool(getattr(args, "fix_perms", False)),
+            bool(getattr(args, "fail_on_warn", False)),
+        )
+        rc = run_security_audit_cmd(
+            fix_perms=bool(getattr(args, "fix_perms", False)),
+            fail_on_warn=bool(getattr(args, "fail_on_warn", False)),
+        )
+        raise SystemExit(rc)
         return
 
     if args.cmd == "ui":
@@ -511,6 +564,12 @@ def main() -> None:
         ]
         if args.no_stream:
             forwarded.append("--no-stream")
+        if args.no_true_stream:
+            forwarded.append("--no-true-stream")
+        if args.no_show_thinking:
+            forwarded.append("--no-show-thinking")
+        if args.thinking:
+            forwarded.append("--thinking")
         if args.no_sources:
             forwarded.append("--no-sources")
 

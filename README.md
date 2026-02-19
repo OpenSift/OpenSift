@@ -66,7 +66,8 @@ This script will:
 - create/activate `.venv`
 - install dependencies (`openai`, `anthropic`, `sentence-transformers`, `-r requirements.txt`)
 - prompt for API keys/tokens and write `backend/.env`
-- run the full OpenSift setup wizard (`python opensift.py setup --skip-key-prompts`)
+- run setup + security audit (`python opensift.py setup --skip-key-prompts --no-launch`)
+- offer launch targets for local gateway/terminal and Docker gateway/terminal
 
 ## 2. Install dependencies
 
@@ -156,6 +157,24 @@ python opensift.py ui --reload
 python opensift.py terminal --provider claude_code
 ```
 
+Terminal thinking/streaming controls:
+
+```bash
+python opensift.py terminal --provider claude --thinking
+```
+
+In-session commands:
+- `/thinking on|off`
+- `/show-thinking on|off`
+- `/true-stream on|off`
+- `/stream on|off`
+
+Run a security audit any time:
+
+```bash
+python opensift.py security-audit --fix-perms
+```
+
 Example: separate class namespace + quiz mode:
 
 ```
@@ -173,6 +192,43 @@ Then inside the terminal chat:
 ```
 uvicorn ui_app:app --reload --host 127.0.0.1 --port 8001
 ```
+
+### 4.c Docker (recommended for consistent local runtime)
+
+From repository root:
+
+```bash
+docker compose up --build opensift-gateway
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8001/
+```
+
+Useful Docker commands:
+
+```bash
+# Start in background
+OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" docker compose up -d --build opensift-gateway
+
+# Start interactive terminal in Docker
+OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" docker compose run --rm opensift-terminal
+
+# Stop
+docker compose down
+
+# View logs
+docker compose logs -f opensift-gateway
+```
+
+Docker notes:
+- The container mounts `./backend` to `/app`, so local state persists:
+  - `.chroma`, `.opensift_sessions`, `.opensift_library`, `.opensift_quiz_attempts`, `.opensift_flashcards`, `.opensift_auth.json`, `SOUL.md`
+- Provider keys/tokens are loaded from `backend/.env` via `env_file`.
+- ChatGPT Codex auto-discovery still works if auth is provided by env (`CHATGPT_CODEX_OAUTH_TOKEN`).
+- Gateway mode in Docker starts UI + MCP automatically.
 
 
 Open:

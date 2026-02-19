@@ -13,7 +13,11 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 # Default models (upgraded)
 # ---------------------------------------------------------------------------
 DEFAULT_OPENAI_MODEL = "gpt-5.2"
-DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5"  # alias -> always latest Sonnet 4.5
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
+SUPPORTED_CLAUDE_MODELS = (
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+)
 
 
 def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]], study_style: str = "") -> str:
@@ -107,10 +111,10 @@ def generate_with_openai(prompt: str, model: Optional[str] = None) -> str:
     return "".join(parts).strip()
 
 
-def generate_with_claude(prompt: str, model: Optional[str] = None) -> str:
+def generate_with_claude(prompt: str, model: Optional[str] = None, thinking_enabled: bool = False) -> str:
     """
     Non-streaming generation via Anthropic SDK.
-    Default model: Claude Sonnet 4.5 (alias, always latest)
+    Default model: Claude Sonnet 4.6
     """
     model = (model or DEFAULT_CLAUDE_MODEL).strip()
 
@@ -120,11 +124,23 @@ def generate_with_claude(prompt: str, model: Optional[str] = None) -> str:
         raise RuntimeError("anthropic package not installed. Run: pip install anthropic") from e
 
     client = anthropic.Anthropic()
-    msg = client.messages.create(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    params: Dict[str, Any] = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if thinking_enabled:
+        params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+
+    try:
+        msg = client.messages.create(**params)
+    except Exception:
+        # Some model/tooling combinations do not support thinking flags yet.
+        if thinking_enabled:
+            params.pop("thinking", None)
+            msg = client.messages.create(**params)
+        else:
+            raise
 
     out: List[str] = []
     for block in getattr(msg, "content", []) or []:

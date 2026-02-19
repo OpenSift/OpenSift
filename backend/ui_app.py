@@ -34,6 +34,7 @@ from app.providers import (
     codex_auth_detected,
     DEFAULT_CLAUDE_MODEL,
     DEFAULT_OPENAI_MODEL,
+    SUPPORTED_CLAUDE_MODELS,
     build_prompt,
     generate_with_claude,
     generate_with_claude_code,
@@ -63,7 +64,7 @@ os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
-OPENSIFT_VERSION = "1.1.3-alpha"
+OPENSIFT_VERSION = "1.2.0-alpha"
 
 logger = configure_logging("opensift.ui")
 
@@ -593,18 +594,31 @@ async def _stream_openai(prompt: str, model: str) -> AsyncGenerator[str, None]:
         _ = s.get_final_response()
 
 
-async def _stream_anthropic(prompt: str, model: str) -> AsyncGenerator[str, None]:
+async def _stream_anthropic(prompt: str, model: str, thinking_enabled: bool = False) -> AsyncGenerator[str, None]:
     import anthropic  # type: ignore
 
     client = anthropic.Anthropic()
-    with client.messages.stream(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        for text in stream.text_stream:
-            if text:
-                yield text
+    params: Dict[str, Any] = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if thinking_enabled:
+        params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+
+    try:
+        with client.messages.stream(**params) as stream:
+            for text in stream.text_stream:
+                if text:
+                    yield text
+    except Exception:
+        if not thinking_enabled:
+            raise
+        params.pop("thinking", None)
+        with client.messages.stream(**params) as stream:
+            for text in stream.text_stream:
+                if text:
+                    yield text
 
 
 async def _stream_codex(prompt: str, model: str) -> AsyncGenerator[str, None]:
@@ -613,7 +627,7 @@ async def _stream_codex(prompt: str, model: str) -> AsyncGenerator[str, None]:
             yield text
 
 
-def _run_generate(provider: str, prompt: str, model: str) -> str:
+def _run_generate(provider: str, prompt: str, model: str, thinking_enabled: bool = False) -> str:
     provider = (provider or "").strip().lower()
     model = (model or "").strip()
 
@@ -623,10 +637,10 @@ def _run_generate(provider: str, prompt: str, model: str) -> str:
 
     if provider == "claude":
         m = model or DEFAULT_CLAUDE_MODEL
-        return generate_with_claude(prompt, model=m)
+        return generate_with_claude(prompt, model=m, thinking_enabled=thinking_enabled)
 
     if provider == "claude_code":
-        # Prefer explicit model; otherwise default to always-latest Sonnet 4.5 alias.
+        # Prefer explicit model; otherwise default to the configured Claude default.
         m = model or DEFAULT_CLAUDE_MODEL
         return generate_with_claude_code(prompt, model=m)
 
@@ -799,7 +813,14 @@ async def root(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
         "chat.html",
-        {"request": request, "owner": owner, "history": history, "csrf_token": csrf_token},
+        {
+            "request": request,
+            "owner": owner,
+            "history": history,
+            "csrf_token": csrf_token,
+            "default_claude_model": DEFAULT_CLAUDE_MODEL,
+            "supported_claude_models": SUPPORTED_CLAUDE_MODELS,
+        },
     )
     _set_csrf_cookie(response, request, csrf_token)
     return response
@@ -812,7 +833,14 @@ async def chat_page(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
         "chat.html",
-        {"request": request, "owner": owner, "history": history, "csrf_token": csrf_token},
+        {
+            "request": request,
+            "owner": owner,
+            "history": history,
+            "csrf_token": csrf_token,
+            "default_claude_model": DEFAULT_CLAUDE_MODEL,
+            "supported_claude_models": SUPPORTED_CLAUDE_MODELS,
+        },
     )
     _set_csrf_cookie(response, request, csrf_token)
     return response
@@ -1273,6 +1301,9 @@ async def chat_stream(
     k: int = Form(8),
     history_turns: int = Form(DEFAULT_HISTORY_TURNS),
     history_enabled: bool = Form(True),
+    thinking_enabled: bool = Form(False),
+    show_thinking: bool = Form(True),
+    true_streaming: bool = Form(True),
 ):
     owner = _normalize_owner(owner)
     msg = (message or "").strip()
@@ -1290,13 +1321,16 @@ async def chat_stream(
 
     _ensure_owner_loaded(owner)
     logger.info(
-        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s",
+        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s thinking_enabled=%s show_thinking=%s true_streaming=%s",
         owner,
         mode,
         provider,
         model,
         k,
         history_enabled,
+        thinking_enabled,
+        show_thinking,
+        true_streaming,
     )
 
     async def gen() -> AsyncGenerator[bytes, None]:
@@ -1305,7 +1339,8 @@ async def chat_stream(
         _history_append(owner, user_msg)
 
         yield _ndjson({"type": "start", "ts": _now()})
-        yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
+        if show_thinking:
+            yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
 
         # Retrieve
         try:
@@ -1399,7 +1434,11 @@ async def chat_stream(
         logger.info("chat_stream_style owner=%s style_chars=%d", owner, len(study_style))
         prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages, study_style=study_style)
 
-        yield _ndjson({"type": "status", "text": "Thinking…"})
+        if show_thinking:
+            thinking_label = "Thinking…"
+            if thinking_enabled and provider == "claude":
+                thinking_label = "Thinking… (Claude extended thinking enabled)"
+            yield _ndjson({"type": "status", "text": thinking_label})
 
         assistant_text = ""
 
@@ -1409,36 +1448,61 @@ async def chat_stream(
 
             if p == "openai":
                 m = (model or DEFAULT_OPENAI_MODEL).strip()
-                try:
-                    async for delta in _stream_openai(prompt, m):
-                        assistant_text += delta
-                        yield _ndjson({"type": "delta", "text": delta})
-                except Exception:
+                if true_streaming:
+                    try:
+                        async for delta in _stream_openai(prompt, m):
+                            assistant_text += delta
+                            yield _ndjson({"type": "delta", "text": delta})
+                    except Exception:
+                        text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
+                        assistant_text = text
+                        yield _ndjson({"type": "delta", "text": assistant_text})
+                else:
                     text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
                     assistant_text = text
-                    yield _ndjson({"type": "delta", "text": assistant_text})
+                    for i in range(0, len(assistant_text), 80):
+                        yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
+                        await asyncio.sleep(0.01)
 
             elif p == "claude":
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
-                try:
-                    async for delta in _stream_anthropic(prompt, m):
-                        assistant_text += delta
-                        yield _ndjson({"type": "delta", "text": delta})
-                except Exception:
-                    text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
+                if true_streaming:
+                    try:
+                        async for delta in _stream_anthropic(prompt, m, thinking_enabled=thinking_enabled):
+                            assistant_text += delta
+                            yield _ndjson({"type": "delta", "text": delta})
+                    except Exception:
+                        text = await anyio.to_thread.run_sync(
+                            lambda: _run_generate(p, prompt, m, thinking_enabled=thinking_enabled)
+                        )
+                        assistant_text = text
+                        yield _ndjson({"type": "delta", "text": assistant_text})
+                else:
+                    text = await anyio.to_thread.run_sync(
+                        lambda: _run_generate(p, prompt, m, thinking_enabled=thinking_enabled)
+                    )
                     assistant_text = text
-                    yield _ndjson({"type": "delta", "text": assistant_text})
+                    for i in range(0, len(assistant_text), 80):
+                        yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
+                        await asyncio.sleep(0.01)
 
             elif p == "codex":
                 m = (model or DEFAULT_OPENAI_MODEL).strip()
-                try:
-                    async for delta in _stream_codex(prompt, m):
-                        assistant_text += delta
-                        yield _ndjson({"type": "delta", "text": delta})
-                except Exception:
+                if true_streaming:
+                    try:
+                        async for delta in _stream_codex(prompt, m):
+                            assistant_text += delta
+                            yield _ndjson({"type": "delta", "text": delta})
+                    except Exception:
+                        text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
+                        assistant_text = text
+                        yield _ndjson({"type": "delta", "text": assistant_text})
+                else:
                     text = await anyio.to_thread.run_sync(lambda: _run_generate(p, prompt, m))
                     assistant_text = text
-                    yield _ndjson({"type": "delta", "text": assistant_text})
+                    for i in range(0, len(assistant_text), 80):
+                        yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
+                        await asyncio.sleep(0.01)
 
             else:
                 # claude_code or others: fallback (UI will show chunked streaming)

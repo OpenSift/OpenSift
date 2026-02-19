@@ -1,0 +1,28 @@
+.git
+.gitignore
+.DS_Store
+**/.DS_Store
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.venv/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.history/
+
+# Local runtime/state artifacts
+backend/.chroma/
+backend/.opensift_sessions/
+backend/.opensift_library/
+backend/.opensift_quiz_attempts/
+backend/.opensift_flashcards/
+backend/.opensift_logs/
+backend/.opensift_auth.json
+
+# Secrets/local env
+backend/.env
+
+# Frontend/site build artifacts unrelated to backend image
+docs/.DS_Store
+package-lock.json
+package.json

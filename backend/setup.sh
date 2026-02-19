@@ -165,6 +165,7 @@ main() {
   python -m pip install -r requirements.txt
 
   touch "$ENV_FILE"
+  chmod 600 "$ENV_FILE" || true
 
   echo
   echo "Configure API keys and tokens (.env)"
@@ -181,9 +182,55 @@ main() {
 
   echo
   echo "Saved configuration to: $ENV_FILE"
-  echo "Launching OpenSift setup wizard..."
+  echo "Running OpenSift setup + security audit..."
   echo "================================================================"
-  python opensift.py setup --skip-key-prompts
+  python opensift.py setup --skip-key-prompts --no-launch
+
+  echo
+  echo "Running standalone security audit..."
+  python opensift.py security-audit --fix-perms || true
+
+  echo
+  echo "Choose launch mode:"
+  echo "  1) Local gateway (UI + MCP)"
+  echo "  2) Local terminal"
+  echo "  3) Docker gateway (recommended)"
+  echo "  4) Docker gateway + terminal"
+  echo "  5) Exit"
+  read -r -p "Select [1-5] (default: 3): " launch_choice
+  launch_choice="${launch_choice:-3}"
+
+  case "$launch_choice" in
+    1)
+      exec python opensift.py gateway --with-mcp
+      ;;
+    2)
+      exec python opensift.py terminal --provider claude_code
+      ;;
+    3|4)
+      if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: docker is not installed or not on PATH."
+        exit 1
+      fi
+      if ! docker compose version >/dev/null 2>&1; then
+        echo "Error: docker compose plugin is required."
+        exit 1
+      fi
+      echo "Starting Docker gateway..."
+      OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" docker compose up -d --build opensift-gateway
+      echo
+      echo "OpenSift gateway is running at: http://127.0.0.1:8001/"
+      echo "Logs: docker compose logs -f opensift-gateway"
+      if [[ "$launch_choice" == "4" ]]; then
+        echo
+        echo "Starting Docker terminal (interactive)..."
+        OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" exec docker compose run --rm opensift-terminal
+      fi
+      ;;
+    *)
+      echo "Setup complete. No launch selected."
+      ;;
+  esac
 }
 
 main "$@"

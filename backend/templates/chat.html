@@ -287,8 +287,27 @@
 
       .controls {
         display: grid;
-        grid-template-columns: 1.25fr 1fr 1fr 122px;
+        grid-template-columns: 1.2fr 1fr .8fr 1.4fr 122px;
         gap: 8px;
+      }
+
+      .toggle-row {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .toggle-row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .toggle-row input[type="checkbox"] {
+        width: auto;
       }
 
       .actions {
@@ -535,7 +554,20 @@
                   <option value="openai">OpenAI</option>
                 </select>
                 <input id="k" type="number" value="8" min="1" max="20" />
+                <select id="model">
+                  <option value="" selected>Auto model</option>
+                  {% for m in supported_claude_models %}
+                    <option value="{{ m }}">{{ m }}</option>
+                  {% endfor %}
+                  <option value="gpt-5.2">gpt-5.2</option>
+                </select>
                 <button class="primary" id="sendBtn" type="button"><span class="icon">➤</span>Send</button>
+              </div>
+
+              <div class="toggle-row">
+                <label><input id="thinkingEnabled" type="checkbox" /> Enable Claude thinking</label>
+                <label><input id="showThinking" type="checkbox" checked /> Show thinking/status</label>
+                <label><input id="trueStreaming" type="checkbox" checked /> True streaming</label>
               </div>
 
               <textarea id="msg" placeholder="Ask OpenSift... (Shift+Enter newline)"></textarea>
@@ -616,6 +648,10 @@
       const modeEl = document.getElementById("mode");
       const providerEl = document.getElementById("provider");
       const kEl = document.getElementById("k");
+      const modelEl = document.getElementById("model");
+      const thinkingEnabledEl = document.getElementById("thinkingEnabled");
+      const showThinkingEl = document.getElementById("showThinking");
+      const trueStreamingEl = document.getElementById("trueStreaming");
       const sendBtn = document.getElementById("sendBtn");
       const clearBtn = document.getElementById("clearBtn");
       const logoutBtn = document.getElementById("logoutBtn");
@@ -771,7 +807,7 @@
         msg.appendChild(bubble);
         chat.appendChild(msg);
         scrollToBottom();
-        return { textEl: textNode };
+        return { textEl: textNode, bubbleEl: bubble };
       }
 
       function setIconButtonLabel(btn, icon, label) {
@@ -839,6 +875,10 @@
         form.append("mode", modeEl.value);
         form.append("provider", providerEl.value);
         form.append("k", kEl.value);
+        form.append("model", modelEl.value);
+        form.append("thinking_enabled", thinkingEnabledEl.checked ? "true" : "false");
+        form.append("show_thinking", showThinkingEl.checked ? "true" : "false");
+        form.append("true_streaming", trueStreamingEl.checked ? "true" : "false");
 
         const res = await csrfFetch("/chat/stream", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
@@ -853,6 +893,11 @@
         const reader = res.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
+        const statusEl = document.createElement("div");
+        statusEl.className = "hint";
+        statusEl.style.marginBottom = "6px";
+        statusEl.textContent = "";
+        a.bubbleEl.insertBefore(statusEl, a.textEl);
 
         while (true) {
           const { value, done } = await reader.read();
@@ -870,6 +915,13 @@
             if (evt.type === "delta") {
               a.textEl.textContent += (evt.text || "");
               scrollToBottom();
+            } else if (evt.type === "status") {
+              if (showThinkingEl.checked) {
+                statusEl.textContent = evt.text || "";
+                scrollToBottom();
+              }
+            } else if (evt.type === "done") {
+              statusEl.textContent = "";
             }
           }
         }

@@ -1,5 +1,65 @@
 # OpenSift Release Notes
 
+## v1.2.0-alpha
+Release date: 2026-02-19
+
+This release adds cross-surface thinking/streaming controls, a new security audit system, and a more complete Docker + setup onboarding path centered around the OpenSift gateway.
+
+### Highlights
+- Added CLI parity for thinking and streaming controls to match the web UI.
+- Added a built-in `security-audit` command with optional permission auto-fixes.
+- Upgraded setup onboarding to run security checks and support Docker launch flows.
+- Switched Docker runtime to a gateway-first architecture with optional terminal service.
+
+### Added
+- New security audit module:
+  - `backend/app/security_audit.py`
+  - Checks sensitive file/dir permissions and local risk signals
+  - Optional permission repair (`--fix-perms`)
+- New launcher command:
+  - `python opensift.py security-audit [--fix-perms] [--fail-on-warn]`
+- New setup behavior:
+  - `python opensift.py setup --no-launch`
+  - Setup now runs a security audit before launch decisions
+- New automated tests:
+  - `backend/tests/test_security_audit.py`
+
+### Changed
+- Terminal chat now supports:
+  - Claude thinking toggle
+  - show/hide thinking status output
+  - true native streaming toggle independent of normal streaming
+- New terminal flags:
+  - `--thinking`
+  - `--no-show-thinking`
+  - `--no-true-stream`
+- New terminal slash commands:
+  - `/thinking on|off`
+  - `/show-thinking on|off`
+  - `/true-stream on|off`
+- Docker compose now provides:
+  - `opensift-gateway` (UI + MCP via gateway)
+  - `opensift-terminal` (interactive terminal profile)
+  - dropped Linux capabilities, `no-new-privileges`, `tmpfs /tmp`
+- `setup.sh` now:
+  - enforces restrictive `.env` permissions
+  - runs setup in no-launch mode + security audit
+  - supports local or Docker launch targets
+  - starts Docker gateway and optional Docker terminal
+
+### Security
+- Added local setup security posture checks for:
+  - `.env`, `.opensift_auth.json`, `SOUL.md`
+  - OpenSift state directories (`.opensift_*`, `.chroma`)
+  - Codex auth file path (default `~/.codex/auth.json`)
+  - debug logging and Docker socket exposure warnings
+- Setup now auto-fixes restrictive permissions where possible (`chmod 600/700` policy).
+
+### Versioning
+- Bumped app version to `1.2.0-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
 ## v1.1.3-alpha (Proposed)
 Release date: 2026-02-18
 

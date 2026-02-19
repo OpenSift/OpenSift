@@ -18,6 +18,7 @@ from app.logging_utils import configure_logging
 from app.providers import (
     DEFAULT_CLAUDE_MODEL,
     DEFAULT_OPENAI_MODEL,
+    SUPPORTED_CLAUDE_MODELS,
     build_prompt,
     generate_with_claude,
     generate_with_claude_code,
@@ -44,6 +45,9 @@ class ChatConfig:
     wrap: int = 100
     history_turns: int = 10
     stream: bool = True
+    true_streaming: bool = True
+    show_thinking: bool = True
+    thinking_enabled: bool = False
     show_sources: bool = True
 
 
@@ -60,6 +64,9 @@ Commands:
   /history on|off
   /sources on|off
   /stream on|off
+  /true-stream on|off
+  /show-thinking on|off
+  /thinking on|off
   /style                         Show global study style
   /style set <text>              Set global study style
   /style clear                   Clear global study style
@@ -93,10 +100,12 @@ def _print_banner(cfg: ChatConfig) -> None:
     print("OpenSift — Terminal Chat")
     print(
         f"Owner: {cfg.owner} | Mode: {cfg.mode} | Provider: {cfg.provider} | k={cfg.k} | "
-        f"history={cfg.history_turns} | stream={'on' if cfg.stream else 'off'}"
+        f"history={cfg.history_turns} | stream={'on' if cfg.stream else 'off'} | "
+        f"true_stream={'on' if cfg.true_streaming else 'off'} | thinking={'on' if cfg.thinking_enabled else 'off'}"
     )
     print(f"Study style: {'configured' if style else 'default/none'}")
     print(f"Defaults: OpenAI={DEFAULT_OPENAI_MODEL} | Claude={DEFAULT_CLAUDE_MODEL}")
+    print(f"Claude models: {', '.join(SUPPORTED_CLAUDE_MODELS)}")
     print("Type /help for commands. Type /quit to exit.")
     print("=" * 72 + "\n")
 
@@ -194,7 +203,11 @@ def _run_generate(cfg: ChatConfig, prompt: str) -> str:
     if cfg.provider == "openai":
         return generate_with_openai(prompt, model=cfg.model or DEFAULT_OPENAI_MODEL)
     if cfg.provider == "claude":
-        return generate_with_claude(prompt, model=cfg.model or DEFAULT_CLAUDE_MODEL)
+        return generate_with_claude(
+            prompt,
+            model=cfg.model or DEFAULT_CLAUDE_MODEL,
+            thinking_enabled=cfg.thinking_enabled,
+        )
     if cfg.provider == "claude_code":
         return generate_with_claude_code(prompt, model=cfg.model or DEFAULT_CLAUDE_MODEL)
     if cfg.provider == "codex":
@@ -219,21 +232,34 @@ async def _stream_openai(prompt: str, model: str) -> AsyncGenerator[str, None]:
         _ = s.get_final_response()
 
 
-async def _stream_anthropic(prompt: str, model: str) -> AsyncGenerator[str, None]:
+async def _stream_anthropic(prompt: str, model: str, thinking_enabled: bool = False) -> AsyncGenerator[str, None]:
     try:
         import anthropic  # type: ignore
     except Exception:
         raise RuntimeError("anthropic package not installed for streaming")
 
     client = anthropic.Anthropic()
-    with client.messages.stream(
-        model=model,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    ) as stream:
-        for text in stream.text_stream:
-            if text:
-                yield text
+    params: Dict[str, Any] = {
+        "model": model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if thinking_enabled:
+        params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+
+    try:
+        with client.messages.stream(**params) as stream:
+            for text in stream.text_stream:
+                if text:
+                    yield text
+    except Exception:
+        if not thinking_enabled:
+            raise
+        params.pop("thinking", None)
+        with client.messages.stream(**params) as stream:
+            for text in stream.text_stream:
+                if text:
+                    yield text
 
 
 async def _stream_codex(prompt: str, model: str) -> AsyncGenerator[str, None]:
@@ -255,6 +281,9 @@ async def answer(
 
     history.append({"role": "user", "text": question, "ts": _now()})
     save_session(cfg.owner, history, DEFAULT_DIR)
+
+    if cfg.show_thinking:
+        print("STATUS: Retrieving relevant passages...")
 
     # Retrieve
     try:
@@ -335,10 +364,15 @@ async def answer(
     study_style = get_global_style()
     prompt = build_prompt(mode=cfg.mode, query=query_for_prompt, passages=passages, study_style=study_style)
 
+    if cfg.show_thinking:
+        if cfg.provider == "claude" and cfg.thinking_enabled:
+            print("STATUS: Thinking... (Claude extended thinking enabled)")
+        else:
+            print("STATUS: Thinking...")
     print("OPENSIFT:")
     assistant_text = ""
 
-    if cfg.stream and cfg.provider in ("openai", "claude", "codex"):
+    if cfg.stream and cfg.provider in ("openai", "claude", "codex") and cfg.true_streaming:
         try:
             if cfg.provider == "openai":
                 model = cfg.model or DEFAULT_OPENAI_MODEL
@@ -354,17 +388,33 @@ async def answer(
                     assistant_text += delta
             else:
                 model = cfg.model or DEFAULT_CLAUDE_MODEL
-                async for delta in _stream_anthropic(prompt, model):
+                async for delta in _stream_anthropic(prompt, model, thinking_enabled=cfg.thinking_enabled):
                     sys.stdout.write(delta)
                     sys.stdout.flush()
                     assistant_text += delta
             print()
         except Exception:
             assistant_text = await anyio.to_thread.run_sync(lambda: _run_generate(cfg, prompt))
-            print(_wrap(assistant_text, cfg.wrap))
+            if cfg.stream:
+                for i in range(0, len(assistant_text), 80):
+                    chunk = assistant_text[i : i + 80]
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+                    await asyncio.sleep(0.01)
+                print()
+            else:
+                print(_wrap(assistant_text, cfg.wrap))
     else:
         assistant_text = await anyio.to_thread.run_sync(lambda: _run_generate(cfg, prompt))
-        print(_wrap(assistant_text, cfg.wrap))
+        if cfg.stream:
+            for i in range(0, len(assistant_text), 80):
+                chunk = assistant_text[i : i + 80]
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
+                await asyncio.sleep(0.01)
+            print()
+        else:
+            print(_wrap(assistant_text, cfg.wrap))
 
     add_break = should_add_break_reminder(history)
     if add_break:
@@ -492,6 +542,33 @@ async def repl(cfg: ChatConfig) -> None:
                 print(f"✅ stream: {'on' if cfg.stream else 'off'}")
                 continue
 
+            if cmd == "/true-stream" and len(parts) >= 2:
+                v = parts[1].strip().lower()
+                if v not in ("on", "off"):
+                    print("⚠️ /true-stream on|off")
+                    continue
+                cfg.true_streaming = (v == "on")
+                print(f"✅ true-stream: {'on' if cfg.true_streaming else 'off'}")
+                continue
+
+            if cmd == "/show-thinking" and len(parts) >= 2:
+                v = parts[1].strip().lower()
+                if v not in ("on", "off"):
+                    print("⚠️ /show-thinking on|off")
+                    continue
+                cfg.show_thinking = (v == "on")
+                print(f"✅ show-thinking: {'on' if cfg.show_thinking else 'off'}")
+                continue
+
+            if cmd == "/thinking" and len(parts) >= 2:
+                v = parts[1].strip().lower()
+                if v not in ("on", "off"):
+                    print("⚠️ /thinking on|off")
+                    continue
+                cfg.thinking_enabled = (v == "on")
+                print(f"✅ thinking: {'on' if cfg.thinking_enabled else 'off'}")
+                continue
+
             if cmd == "/style":
                 if len(parts) == 1:
                     style = get_global_style()
@@ -600,6 +677,9 @@ def main() -> None:
     parser.add_argument("--wrap", type=int, default=100, help="Wrap width (default: 100)")
     parser.add_argument("--history-turns", type=int, default=10, help="How many messages to include as history")
     parser.add_argument("--no-stream", action="store_true", help="Disable streaming output")
+    parser.add_argument("--no-true-stream", action="store_true", help="Disable provider-native true streaming")
+    parser.add_argument("--no-show-thinking", action="store_true", help="Hide retrieval/thinking status lines")
+    parser.add_argument("--thinking", action="store_true", help="Enable Claude extended thinking where supported")
     parser.add_argument("--no-sources", action="store_true", help="Disable sources printing")
     args = parser.parse_args()
 
@@ -612,6 +692,9 @@ def main() -> None:
         wrap=args.wrap,
         history_turns=args.history_turns,
         stream=not args.no_stream,
+        true_streaming=not args.no_true_stream,
+        show_thinking=not args.no_show_thinking,
+        thinking_enabled=bool(args.thinking),
         show_sources=not args.no_sources,
     )
 

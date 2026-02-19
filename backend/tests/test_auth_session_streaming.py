@@ -107,3 +107,49 @@ def test_chat_stream_returns_done_and_persists_messages(tmp_path: Path, monkeypa
     assert len(exported) == 2
     assert exported[0]["role"] == "user"
     assert exported[1]["role"] == "assistant"
+
+
+def test_chat_stream_hides_status_and_uses_buffered_mode(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+    monkeypatch.setattr(ui_app, "_run_generate", lambda provider, prompt, model, thinking_enabled=False: "X" * 240)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "carol",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "claude_code",
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "show_thinking": "false",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    status_events = [e for e in events if e.get("type") == "status"]
+    delta_events = [e for e in events if e.get("type") == "delta"]
+
+    assert not status_events
+    assert len(delta_events) >= 2
+    assert any(e.get("type") == "done" for e in events)
