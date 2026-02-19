@@ -5,7 +5,6 @@ import re
 from typing import Any, Dict
 
 SOUL_PATH_ENV = "OPENSIFT_SOUL_PATH"
-DEFAULT_SOUL_PATH = os.path.join(os.path.expanduser("~"), ".opensift", "SOUL.md")
 GLOBAL_KEY = "__global__"
 
 _OWNER_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
@@ -38,18 +37,34 @@ def _normalize_owner(owner: str) -> str:
 
 
 def soul_path() -> str:
-    return (os.getenv(SOUL_PATH_ENV, DEFAULT_SOUL_PATH) or DEFAULT_SOUL_PATH).strip()
+    configured = (os.getenv(SOUL_PATH_ENV, "") or "").strip()
+    if configured:
+        return configured
+    # In containers HOME may be /nonexistent; keep SOUL under app cwd in that case.
+    home = os.path.expanduser("~")
+    if home and home not in ("/", "/nonexistent"):
+        return os.path.join(home, ".opensift", "SOUL.md")
+    return os.path.join(os.getcwd(), ".opensift", "SOUL.md")
 
 
 def ensure_soul_file(path: str | None = None) -> str:
     p = path or soul_path()
-    parent = os.path.dirname(p)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    if not os.path.exists(p):
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_TEMPLATE.rstrip() + "\n")
-    return p
+    candidates = [p]
+    fallback = os.path.join(os.getcwd(), ".opensift", "SOUL.md")
+    if fallback not in candidates:
+        candidates.append(fallback)
+    for candidate in candidates:
+        try:
+            parent = os.path.dirname(candidate)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            if not os.path.exists(candidate):
+                with open(candidate, "w", encoding="utf-8") as f:
+                    f.write(DEFAULT_TEMPLATE.rstrip() + "\n")
+            return candidate
+        except OSError:
+            continue
+    raise PermissionError(f"Unable to initialize SOUL file; attempted: {candidates}")
 
 
 def load_soul_map(path: str | None = None) -> Dict[str, str]:

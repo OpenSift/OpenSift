@@ -5,6 +5,7 @@ import getpass
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -18,7 +19,7 @@ from app.logging_utils import configure_logging
 from app.security_audit import format_audit_report, run_security_audit
 
 logger = configure_logging("opensift.launcher")
-OPENSIFT_VERSION = "1.2.0-alpha"
+OPENSIFT_VERSION = "1.3.1-alpha"
 
 
 def run_ui(host: str, port: int, reload: bool) -> None:
@@ -78,6 +79,10 @@ def _write_env_file(path: str, values: Dict[str, str]) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
 
 
 def _mask(value: str) -> str:
@@ -131,19 +136,83 @@ def _env_or_file(env_data: Dict[str, str], key: str) -> str:
     return os.environ.get(key, "").strip() or env_data.get(key, "").strip()
 
 
-def _codex_auth_file_token() -> str:
-    path = os.environ.get("OPENSIFT_CODEX_AUTH_PATH", "").strip() or os.path.join(
-        os.path.expanduser("~"),
-        ".codex",
-        "auth.json",
-    )
-    if not os.path.exists(path):
-        return ""
+def _claude_code_cli_available(env_data: Dict[str, str]) -> bool:
+    cmd = (_env_or_file(env_data, "OPENSIFT_CLAUDE_CODE_CMD") or "claude").strip() or "claude"
+    return bool(shutil.which(cmd))
+
+
+def _maybe_prompt_cli_install(
+    env_data: Dict[str, str],
+    label: str,
+    env_key: str,
+    default_cmd: str,
+    suggested_install: str,
+    skip_prompts: bool = False,
+) -> None:
+    cmd = (_env_or_file(env_data, env_key) or default_cmd).strip() or default_cmd
+    if shutil.which(cmd):
+        print(f"{label} CLI detected: {cmd}")
+        return
+
+    print(f"\n⚠️ {label} CLI not found on PATH (command: {cmd})")
+    if skip_prompts:
+        print(f"Skipping {label} install prompt.")
+        return
+
+    if _prompt_choice(f"Install {label} CLI now", ["y", "n"], default="n") != "y":
+        print(f"Skipping {label} install.")
+        return
+
+    install_cmd = input(
+        f"Install command (default: {suggested_install}; blank to skip): "
+    ).strip()
+    if not install_cmd:
+        install_cmd = suggested_install.strip()
+    if not install_cmd:
+        print("No install command provided. Skipping.")
+        return
+
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return ""
+        rc = subprocess.run(install_cmd, shell=True, check=False).returncode
+    except Exception as e:
+        print(f"Install command failed to start: {e}")
+        return
+
+    if rc != 0:
+        print(f"Install command exited with code {rc}. Continue setup and configure {env_key} manually if needed.")
+        return
+
+    if shutil.which(cmd):
+        print(f"{label} CLI installation complete: {cmd}")
+    else:
+        print(f"Install command completed, but '{cmd}' is still not detected. You may need to set {env_key}.")
+
+
+def _choose_default_provider(env_data: Dict[str, str]) -> str:
+    if _claude_code_cli_available(env_data):
+        return "claude_code"
+    if (env_data.get("ANTHROPIC_API_KEY") or "").strip():
+        return "claude"
+    if (env_data.get("CHATGPT_CODEX_OAUTH_TOKEN") or "").strip() or _codex_auth_file_token():
+        return "codex"
+    if (env_data.get("OPENAI_API_KEY") or "").strip():
+        return "openai"
+    if (env_data.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
+        return "claude_code"
+    return "claude_code"
+
+
+def _codex_auth_file_token() -> str:
+    override = os.environ.get("OPENSIFT_CODEX_AUTH_PATH", "").strip()
+    paths = []
+    if override:
+        paths.append(os.path.expanduser(override))
+    paths.extend(
+        [
+            "/app/.codex/auth.json",
+            os.path.join(os.path.expanduser("~"), ".codex", "auth.json"),
+        ]
+    )
 
     preferred_keys = (
         "chatgpt_codex_oauth_token",
@@ -174,7 +243,23 @@ def _codex_auth_file_token() -> str:
             return ""
         return ""
 
-    return find(data)
+    seen = set()
+    for path in paths:
+        p = os.path.abspath(path)
+        if p in seen:
+            continue
+        seen.add(p)
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        token = find(data)
+        if token:
+            return token
+    return ""
 
 
 def _gateway_provider_summary(env_data: Dict[str, str]) -> List[str]:
@@ -223,6 +308,14 @@ def _wait_for_http_health(url: str, timeout_s: float) -> bool:
     return False
 
 
+def _health_probe_host(bind_host: str) -> str:
+    h = (bind_host or "").strip().lower()
+    # 0.0.0.0 / :: are bind-all addresses, not valid probe hosts for guarded localhost checks.
+    if h in ("0.0.0.0", "::", "[::]"):
+        return "127.0.0.1"
+    return bind_host
+
+
 def _terminate_managed(procs: List[ManagedProc]) -> None:
     for mp in procs:
         if mp.proc.poll() is None:
@@ -242,9 +335,15 @@ def _terminate_managed(procs: List[ManagedProc]) -> None:
             mp.proc.kill()
 
 
+def _is_non_fatal_service_exit(name: str, rc: int) -> bool:
+    # MCP can validly exit in non-interactive environments (e.g., Docker detached mode).
+    return name == "mcp" and rc == 0
+
+
 def run_gateway(host: str, port: int, reload: bool, with_mcp: bool, health_timeout: float) -> int:
     env_path = os.path.join(os.getcwd(), ".env")
     env_data = _parse_env_file(env_path)
+    _apply_env(env_data)
 
     print("\nOpenSift Gateway")
     print("=" * 72)
@@ -278,23 +377,29 @@ def run_gateway(host: str, port: int, reload: bool, with_mcp: bool, health_timeo
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
-    health_url = f"http://{host}:{port}/health"
+    probe_host = _health_probe_host(host)
+    health_url = f"http://{probe_host}:{port}/health"
     ok = _wait_for_http_health(health_url, timeout_s=health_timeout)
     if not ok:
-        print(f"[gateway] ui health check failed after {health_timeout:.1f}s: {health_url}")
-        logger.error("gateway_health_failed url=%s timeout_s=%.1f", health_url, health_timeout)
+        print(f"[gateway] ui health check failed after {health_timeout:.1f}s: {health_url} (bind={host})")
+        logger.error("gateway_health_failed url=%s bind_host=%s timeout_s=%.1f", health_url, host, health_timeout)
         _terminate_managed(managed)
         return 1
 
-    print(f"[gateway] ui is healthy: {health_url}")
+    print(f"[gateway] ui is healthy: {health_url} (bind={host})")
     print("[gateway] running. Press Ctrl+C to stop all services.")
-    logger.info("gateway_running health_url=%s", health_url)
+    logger.info("gateway_running health_url=%s bind_host=%s", health_url, host)
 
     try:
         while not stop_flag["stop"]:
-            for mp in managed:
+            for mp in list(managed):
                 rc = mp.proc.poll()
                 if rc is not None:
+                    if _is_non_fatal_service_exit(mp.name, rc):
+                        print(f"[gateway] service '{mp.name}' exited cleanly (code {rc}); continuing without it.")
+                        logger.warning("gateway_service_exited_non_fatal name=%s rc=%d", mp.name, rc)
+                        managed.remove(mp)
+                        continue
                     print(f"[gateway] service '{mp.name}' exited with code {rc}")
                     logger.error("gateway_service_exited name=%s rc=%d", mp.name, rc)
                     _terminate_managed(managed)
@@ -333,7 +438,11 @@ def run_security_audit_cmd(fix_perms: bool = False, fail_on_warn: bool = False) 
     return 1 if rc != 0 else 0
 
 
-def run_setup(skip_key_prompts: bool = False, no_launch: bool = False) -> None:
+def run_setup(
+    skip_key_prompts: bool = False,
+    no_launch: bool = False,
+    skip_cli_install_prompts: bool = False,
+) -> None:
     env_path = os.path.join(os.getcwd(), ".env")
     env_data = _parse_env_file(env_path)
 
@@ -376,6 +485,22 @@ def run_setup(skip_key_prompts: bool = False, no_launch: bool = False) -> None:
         print("\nSkipping key prompts (using existing .env values).")
 
     _apply_env(updated)
+    _maybe_prompt_cli_install(
+        updated,
+        label="Claude Code",
+        env_key="OPENSIFT_CLAUDE_CODE_CMD",
+        default_cmd="claude",
+        suggested_install="npm install -g @anthropic-ai/claude-code",
+        skip_prompts=skip_cli_install_prompts,
+    )
+    _maybe_prompt_cli_install(
+        updated,
+        label="ChatGPT Codex",
+        env_key="OPENSIFT_CODEX_CMD",
+        default_cmd="codex",
+        suggested_install="npm install -g @openai/codex",
+        skip_prompts=skip_cli_install_prompts,
+    )
     codex_cmd = (updated.get("OPENSIFT_CODEX_CMD") or "codex").strip()
     if updated.get("CHATGPT_CODEX_OAUTH_TOKEN") and _cmd_looks_like_wrong_codex(codex_cmd):
         print("\n⚠️ Codex command validation warning:")
@@ -414,15 +539,7 @@ def run_setup(skip_key_prompts: bool = False, no_launch: bool = False) -> None:
         port = 8001
     reload = _prompt_choice("Enable auto-reload", ["y", "n"], default="y") == "y"
 
-    provider_default = "claude_code"
-    if updated.get("ANTHROPIC_API_KEY"):
-        provider_default = "claude"
-    elif updated.get("OPENAI_API_KEY"):
-        provider_default = "openai"
-    elif (updated.get("CHATGPT_CODEX_OAUTH_TOKEN") or _codex_auth_file_token()):
-        provider_default = "codex"
-    elif updated.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        provider_default = "claude_code"
+    provider_default = _choose_default_provider(updated)
 
     provider = _prompt_choice(
         "Terminal provider",
@@ -460,6 +577,11 @@ def main() -> None:
         action="store_true",
         help="Run setup and security audit, then exit without launching services",
     )
+    p_setup.add_argument(
+        "--skip-cli-install-prompts",
+        action="store_true",
+        help="Skip prompts to install missing Claude/Codex CLIs",
+    )
 
     p_audit = sub.add_parser("security-audit", help="Run local security audit checks for OpenSift setup")
     p_audit.add_argument("--fix-perms", action="store_true", help="Auto-fix restrictive file/dir permissions when possible")
@@ -482,6 +604,12 @@ def main() -> None:
     p_term.add_argument("--no-true-stream", action="store_true", help="Disable provider-native true streaming")
     p_term.add_argument("--no-show-thinking", action="store_true", help="Hide retrieval/thinking status lines")
     p_term.add_argument("--thinking", action="store_true", help="Enable Claude extended thinking where supported")
+    p_term.add_argument(
+        "--thinking-level",
+        default="medium",
+        choices=["low", "medium", "high", "extra_high"],
+        help="Claude thinking level",
+    )
     p_term.add_argument("--no-sources", action="store_true", help="Disable sources printing")
 
     p_gateway = sub.add_parser("gateway", help="Run supervised OpenSift gateway (UI + optional MCP)")
@@ -505,6 +633,7 @@ def main() -> None:
         run_setup(
             skip_key_prompts=bool(getattr(args, "skip_key_prompts", False)),
             no_launch=bool(getattr(args, "no_launch", False)),
+            skip_cli_install_prompts=bool(getattr(args, "skip_cli_install_prompts", False)),
         )
         return
 
@@ -570,6 +699,8 @@ def main() -> None:
             forwarded.append("--no-show-thinking")
         if args.thinking:
             forwarded.append("--thinking")
+        if args.thinking_level:
+            forwarded.extend(["--thinking-level", args.thinking_level])
         if args.no_sources:
             forwarded.append("--no-sources")
 

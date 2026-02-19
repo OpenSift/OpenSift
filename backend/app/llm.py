@@ -31,6 +31,24 @@ def _openai_enabled() -> bool:
     return bool(settings.openai_api_key) or bool(os.environ.get("OPENAI_API_KEY"))
 
 
+def using_local_embeddings() -> bool:
+    return not _openai_enabled()
+
+
+def local_embedding_model_loaded() -> bool:
+    return _local_model is not None
+
+
+def warmup_local_embeddings() -> None:
+    """
+    Preload local embeddings model so first chat retrieval does not block on
+    Hugging Face downloads/model initialization in the request path.
+    """
+    if not using_local_embeddings():
+        return
+    _ = _get_local_model()
+
+
 def _openai_client():
     if not _openai_enabled():
         return None

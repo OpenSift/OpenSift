@@ -138,6 +138,51 @@ prompt_plain_key() {
   fi
 }
 
+prompt_install_cli_if_missing() {
+  local label="$1"
+  local env_key="$2"
+  local default_cmd="$3"
+  local suggested_install="$4"
+
+  local configured_cmd
+  configured_cmd="$(get_env_value "$env_key")"
+  local cmd="${configured_cmd:-$default_cmd}"
+
+  if command -v "$cmd" >/dev/null 2>&1; then
+    echo "$label CLI detected: $cmd"
+    return 0
+  fi
+
+  echo
+  echo "⚠️ $label CLI not found on PATH (command: $cmd)"
+  read -r -p "Install $label CLI now? [y/N]: " install_now
+  install_now="${install_now,,}"
+  if [[ "$install_now" != "y" && "$install_now" != "yes" ]]; then
+    echo "Skipping $label install."
+    return 0
+  fi
+
+  read -r -p "Install command (default: $suggested_install, blank to skip): " install_cmd
+  install_cmd="${install_cmd//$'\n'/}"
+  if [[ -z "$install_cmd" ]]; then
+    install_cmd="$suggested_install"
+  fi
+  if [[ -z "$install_cmd" ]]; then
+    echo "No install command provided. Skipping."
+    return 0
+  fi
+
+  if bash -lc "$install_cmd"; then
+    if command -v "$cmd" >/dev/null 2>&1; then
+      echo "$label CLI installation complete: $cmd"
+    else
+      echo "Install command completed, but '$cmd' is still not detected. You may need to set $env_key."
+    fi
+  else
+    echo "Install failed for $label CLI. You can continue and set $env_key manually."
+  fi
+}
+
 main() {
   echo "OpenSift Bootstrap Setup"
   echo "================================================================"
@@ -168,6 +213,11 @@ main() {
   chmod 600 "$ENV_FILE" || true
 
   echo
+  echo "Checking optional CLI dependencies..."
+  prompt_install_cli_if_missing "Claude Code" "OPENSIFT_CLAUDE_CODE_CMD" "claude" "npm install -g @anthropic-ai/claude-code"
+  prompt_install_cli_if_missing "ChatGPT Codex" "OPENSIFT_CODEX_CMD" "codex" "npm install -g @openai/codex"
+
+  echo
   echo "Configure API keys and tokens (.env)"
   echo "================================================================"
   prompt_secret_key "OPENAI_API_KEY" "OpenAI API key (optional)"
@@ -184,7 +234,7 @@ main() {
   echo "Saved configuration to: $ENV_FILE"
   echo "Running OpenSift setup + security audit..."
   echo "================================================================"
-  python opensift.py setup --skip-key-prompts --no-launch
+  python opensift.py setup --skip-key-prompts --skip-cli-install-prompts --no-launch
 
   echo
   echo "Running standalone security audit..."
@@ -217,14 +267,14 @@ main() {
         exit 1
       fi
       echo "Starting Docker gateway..."
-      OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" docker compose up -d --build opensift-gateway
+      docker compose up -d --build opensift-gateway
       echo
       echo "OpenSift gateway is running at: http://127.0.0.1:8001/"
       echo "Logs: docker compose logs -f opensift-gateway"
       if [[ "$launch_choice" == "4" ]]; then
         echo
         echo "Starting Docker terminal (interactive)..."
-        OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" exec docker compose run --rm opensift-terminal
+        exec docker compose run --rm opensift-terminal
       fi
       ;;
     *)

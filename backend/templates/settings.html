@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpenSift Settings</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #121a30;
+        --panel-2: #172542;
+        --text: #e9eefc;
+        --muted: #97a6c9;
+        --line: rgba(255,255,255,.12);
+        --brand: #4f74ff;
+        --danger: #c85b5b;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(1200px 700px at -20% -25%, #2b3f84 0%, transparent 56%),
+          radial-gradient(900px 540px at 130% -10%, #20416b 0%, transparent 58%),
+          linear-gradient(180deg, #080c16 0%, #0b1020 100%);
+      }
+      .app {
+        height: 100vh;
+        display: grid;
+        grid-template-columns: 280px 1fr;
+      }
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+      }
+      .section {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        font-size: 18px;
+        font-weight: 650;
+      }
+      .tab-list {
+        display: grid;
+        gap: 8px;
+      }
+      .tab-btn {
+        text-align: left;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255,255,255,.05);
+        color: var(--text);
+        padding: 9px 11px;
+        cursor: pointer;
+      }
+      .tab-btn.active { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
+      .hint { font-size: 12px; color: var(--muted); }
+      .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+      .topbar {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .content {
+        min-height: 0;
+        overflow: auto;
+        padding: 18px;
+      }
+      .panel {
+        display: none;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        padding: 16px;
+      }
+      .panel.active { display: block; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .stack { display: grid; gap: 10px; }
+      .out {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        white-space: pre-wrap;
+        font-size: 13px;
+        background: rgba(0,0,0,.15);
+      }
+      input, select, textarea, button { font: inherit; }
+      input, select, textarea {
+        width: 100%;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255,255,255,.04);
+        padding: 9px 10px;
+      }
+      textarea { min-height: 120px; resize: vertical; }
+      button {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255,255,255,.05);
+        color: var(--text);
+        padding: 9px 10px;
+        cursor: pointer;
+      }
+      button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
+      button.danger { background: rgba(200,91,91,.2); border-color: rgba(200,91,91,.4); }
+      @media (max-width: 960px) {
+        .app { grid-template-columns: 1fr; }
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body data-csrf="{{ csrf_token }}">
+    <div class="app">
+      <aside class="sidebar">
+        <div class="section"><div class="brand">OpenSift Settings</div></div>
+        <div class="section">
+          <div class="tab-list">
+            <button type="button" class="tab-btn active" data-tab="authTab">Auth</button>
+            <button type="button" class="tab-btn" data-tab="soulTab">SOUL</button>
+            <button type="button" class="tab-btn" data-tab="wellnessTab">Wellness</button>
+          </div>
+        </div>
+        <div class="section" style="border-bottom:none;">
+          <div class="hint">Owner context for return navigation</div>
+          <input id="owner" value="{{ owner }}" placeholder="owner" />
+        </div>
+        <div class="section" style="display:flex; gap:8px; border-top:1px solid var(--line);">
+          <button id="backToChatBtn" type="button" class="primary" style="width:100%;">Back To Chat</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar">
+          <strong>Settings</strong>
+          <span class="hint">Profile, security, style, and wellness controls</span>
+        </div>
+
+        <div class="content">
+          <section id="authTab" class="panel active">
+            <div class="stack">
+              <div class="hint" id="authHint">Password configured: {{ has_password }} · token hint: ***{{ token_hint }}</div>
+              <div class="grid">
+                <div class="stack">
+                  <strong>Password Settings</strong>
+                  <input id="newPassword" type="password" placeholder="New password (min 8 chars)" />
+                  <input id="confirmPassword" type="password" placeholder="Confirm password" />
+                  <button id="savePasswordBtn" type="button">Set Password</button>
+                </div>
+                <div class="stack">
+                  <strong>Login Token Settings</strong>
+                  <div class="hint">Rotate token to invalidate old token-based login links.</div>
+                  <button id="rotateTokenBtn" type="button" class="danger">Rotate Login Token</button>
+                  <div class="out" id="tokenOut">No new token generated yet.</div>
+                </div>
+              </div>
+              <div class="stack" style="margin-top:10px;">
+                <strong>Provider Credentials and CLI Paths</strong>
+                <div class="hint">Enter new values to update. Leave blank to keep current. Type <code>none</code> to clear.</div>
+                <div class="grid">
+                  <input id="openaiApiKey" type="password" placeholder="OPENAI_API_KEY" />
+                  <input id="anthropicApiKey" type="password" placeholder="ANTHROPIC_API_KEY" />
+                </div>
+                <div class="grid">
+                  <input id="claudeCodeToken" type="password" placeholder="CLAUDE_CODE_OAUTH_TOKEN" />
+                  <input id="codexOauthToken" type="password" placeholder="CHATGPT_CODEX_OAUTH_TOKEN" />
+                </div>
+                <div class="grid">
+                  <input id="claudeCodeCmd" placeholder="OPENSIFT_CLAUDE_CODE_CMD (default: claude)" />
+                  <input id="codexCmd" placeholder="OPENSIFT_CODEX_CMD (default: codex)" />
+                </div>
+                <div class="grid">
+                  <button id="installClaudeBtn" type="button">Install Claude (Docker)</button>
+                  <button id="installClaudeCodeBtn" type="button">Install Claude Code (Docker)</button>
+                </div>
+                <div class="grid">
+                  <button id="installCodexBtn" type="button">Install Codex (Docker)</button>
+                  <div class="hint">Installs into <code>/app/.opensift_tools/bin</code> and updates command path automatically.</div>
+                </div>
+                <div class="stack">
+                  <progress id="installProgressBar" max="100" value="0" style="width:100%; height:14px;"></progress>
+                  <div class="hint" id="installProgressMeta">Idle.</div>
+                </div>
+                <div class="out" id="providerStatus">Provider status unavailable.</div>
+                <button id="saveProviderSettingsBtn" type="button">Save Provider Settings</button>
+                <div class="out" id="providerOut">Installer logs will appear here and remain until you clear or run another install.</div>
+              </div>
+            </div>
+          </section>
+
+          <section id="soulTab" class="panel">
+            <div class="stack">
+              <strong>SOUL.md (Global Study Personality)</strong>
+              <textarea id="soulStyle" placeholder="Example: Explain with analogies + concise bullets + short quizzes."></textarea>
+              <div style="display:flex; gap:8px;">
+                <button id="saveSoulBtn" type="button">Save SOUL</button>
+                <button id="clearSoulBtn" type="button" class="danger">Clear SOUL</button>
+              </div>
+              <div class="hint" id="soulHint">Global style applies to all chats.</div>
+            </div>
+          </section>
+
+          <section id="wellnessTab" class="panel">
+            <div class="stack">
+              <strong>Wellness Reminder Settings</strong>
+              <label class="hint"><input id="wellnessEnabled" type="checkbox" /> Enable reminders</label>
+              <div class="grid">
+                <input id="wellnessEveryMsgs" type="number" min="1" placeholder="Every N user messages" />
+                <input id="wellnessMinMinutes" type="number" min="1" placeholder="Minimum minutes gap" />
+              </div>
+              <button id="saveWellnessBtn" type="button">Save Wellness</button>
+              <div class="hint" id="wellnessHint">Applies globally to UI and terminal chat.</div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const csrfToken = document.body.dataset.csrf || "";
+      function csrfFetch(url, options = {}) {
+        const headers = new Headers(options.headers || {});
+        headers.set("X-CSRF-Token", csrfToken);
+        return fetch(url, { ...options, headers });
+      }
+
+      async function ensureAuth(res) {
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = "/login";
+          return false;
+        }
+        return true;
+      }
+
+      const tabs = Array.from(document.querySelectorAll(".tab-btn"));
+      for (const btn of tabs) {
+        btn.addEventListener("click", () => {
+          for (const b of tabs) b.classList.remove("active");
+          btn.classList.add("active");
+          for (const p of document.querySelectorAll(".panel")) p.classList.remove("active");
+          const panel = document.getElementById(btn.dataset.tab);
+          if (panel) panel.classList.add("active");
+        });
+      }
+
+      const ownerEl = document.getElementById("owner");
+      function owner() {
+        const raw = ownerEl.value.trim() || "default";
+        const normalized = raw.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 128) || "default";
+        ownerEl.value = normalized;
+        return normalized;
+      }
+
+      document.getElementById("backToChatBtn").addEventListener("click", () => {
+        window.location.href = `/chat?owner=${encodeURIComponent(owner())}`;
+      });
+
+      async function loadAuthInfo() {
+        const res = await fetch("/chat/settings/auth");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        document.getElementById("authHint").textContent = `Password configured: ${data.has_password} · token hint: ***${data.token_hint || ""}`;
+      }
+
+      function _asHint(value, configured) {
+        if (!configured) return "not set";
+        return value || "set";
+      }
+
+      async function loadProviderSettings() {
+        const res = await fetch("/chat/settings/providers");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        document.getElementById("claudeCodeCmd").placeholder = `OPENSIFT_CLAUDE_CODE_CMD (current: ${data.claude_code_cmd || "claude"})`;
+        document.getElementById("codexCmd").placeholder = `OPENSIFT_CODEX_CMD (current: ${data.codex_cmd || "codex"})`;
+        document.getElementById("providerStatus").textContent =
+          `OPENAI: ${_asHint(data.openai_api_key_hint, data.openai_api_key_set)} | ` +
+          `ANTHROPIC: ${_asHint(data.anthropic_api_key_hint, data.anthropic_api_key_set)} | ` +
+          `CLAUDE_TOKEN: ${_asHint(data.claude_code_oauth_token_hint, data.claude_code_oauth_token_set)} | ` +
+          `CODEX_TOKEN: ${_asHint(data.chatgpt_codex_oauth_token_hint, data.chatgpt_codex_oauth_token_set)} | ` +
+          `claude cmd ok: ${data.claude_code_cli_available} | codex cmd ok: ${data.codex_cli_available}`;
+      }
+
+      document.getElementById("savePasswordBtn").addEventListener("click", async () => {
+        const form = new FormData();
+        form.append("new_password", document.getElementById("newPassword").value || "");
+        form.append("confirm_password", document.getElementById("confirmPassword").value || "");
+        const res = await csrfFetch("/chat/settings/auth/password", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          document.getElementById("tokenOut").textContent = "Failed to set password.";
+          return;
+        }
+        document.getElementById("newPassword").value = "";
+        document.getElementById("confirmPassword").value = "";
+        await loadAuthInfo();
+      });
+
+      document.getElementById("rotateTokenBtn").addEventListener("click", async () => {
+        const res = await csrfFetch("/chat/settings/auth/token/rotate", { method: "POST" });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          document.getElementById("tokenOut").textContent = "Failed to rotate token.";
+          return;
+        }
+        const data = await res.json();
+        document.getElementById("tokenOut").textContent = `New token (save now): ${data.token}`;
+        await loadAuthInfo();
+      });
+
+      document.getElementById("saveProviderSettingsBtn").addEventListener("click", async () => {
+        const form = new FormData();
+        form.append("openai_api_key", document.getElementById("openaiApiKey").value || "");
+        form.append("anthropic_api_key", document.getElementById("anthropicApiKey").value || "");
+        form.append("claude_code_oauth_token", document.getElementById("claudeCodeToken").value || "");
+        form.append("chatgpt_codex_oauth_token", document.getElementById("codexOauthToken").value || "");
+        form.append("claude_code_cmd", document.getElementById("claudeCodeCmd").value || "");
+        form.append("codex_cmd", document.getElementById("codexCmd").value || "");
+        const res = await csrfFetch("/chat/settings/providers", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          document.getElementById("providerOut").textContent = "Failed to save provider settings.";
+          return;
+        }
+        document.getElementById("openaiApiKey").value = "";
+        document.getElementById("anthropicApiKey").value = "";
+        document.getElementById("claudeCodeToken").value = "";
+        document.getElementById("codexOauthToken").value = "";
+        document.getElementById("claudeCodeCmd").value = "";
+        document.getElementById("codexCmd").value = "";
+        await loadProviderSettings();
+      });
+
+      async function installProviderCli(target, label) {
+        const progressBar = document.getElementById("installProgressBar");
+        const progressMeta = document.getElementById("installProgressMeta");
+        const providerOut = document.getElementById("providerOut");
+        const installButtons = [
+          document.getElementById("installClaudeBtn"),
+          document.getElementById("installClaudeCodeBtn"),
+          document.getElementById("installCodexBtn"),
+        ];
+        for (const b of installButtons) b.disabled = true;
+        progressBar.value = 0;
+        progressMeta.textContent = `Installing ${label}...`;
+        providerOut.textContent = `Installing ${label} inside Docker container...`;
+        let sawDone = false;
+        let sawError = false;
+
+        const form = new FormData();
+        form.append("target", target);
+        try {
+          const res = await csrfFetch("/chat/settings/providers/install/stream", { method: "POST", body: form });
+          if (!(await ensureAuth(res))) return;
+          if (!res.ok || !res.body) {
+            providerOut.textContent = `Install failed for ${label}: unable to start installer stream.`;
+            return;
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let idx;
+            while ((idx = buffer.indexOf("\n")) >= 0) {
+              const line = buffer.slice(0, idx).trim();
+              buffer = buffer.slice(idx + 1);
+              if (!line) continue;
+              let evt;
+              try { evt = JSON.parse(line); } catch { continue; }
+
+              if (evt.type === "progress") {
+                const pct = Math.max(0, Math.min(100, Number(evt.percent || 0)));
+                progressBar.value = pct;
+                const eta = Number(evt.eta_seconds || 0);
+                progressMeta.textContent = `Progress: ${pct}% · ETA: ${eta}s`;
+              } else if (evt.type === "log") {
+                providerOut.textContent = `${providerOut.textContent}\n${evt.text || ""}`.trim();
+              } else if (evt.type === "error") {
+                sawError = true;
+                providerOut.textContent = `Install failed for ${label}: ${evt.message || evt.error || "unknown error"}`;
+                progressMeta.textContent = "Install failed.";
+                progressBar.value = 0;
+              } else if (evt.type === "done") {
+                sawDone = true;
+                progressBar.value = 100;
+                progressMeta.textContent = "Install complete.";
+                providerOut.textContent =
+                  `Installed ${evt.target} (${evt.package}) at ${evt.cmd_path}\n` +
+                  `${evt.install_log_tail || ""}`;
+              }
+            }
+          }
+          await loadProviderSettings();
+          if (!sawDone && !sawError) {
+            progressMeta.textContent = "Install ended without success signal.";
+            providerOut.textContent = `${providerOut.textContent}\nInstaller stream ended unexpectedly.`.trim();
+          }
+        } finally {
+          for (const b of installButtons) b.disabled = false;
+        }
+      }
+
+      document.getElementById("installClaudeBtn").addEventListener("click", () => installProviderCli("claude", "Claude"));
+      document.getElementById("installClaudeCodeBtn").addEventListener("click", () => installProviderCli("claude_code", "Claude Code"));
+      document.getElementById("installCodexBtn").addEventListener("click", () => installProviderCli("codex", "Codex"));
+
+      async function loadSoul() {
+        const res = await fetch("/chat/soul");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        const style = data.style || "";
+        document.getElementById("soulStyle").value = style;
+        document.getElementById("soulHint").textContent = style.trim() ? "SOUL style active." : "No global SOUL style set.";
+      }
+
+      document.getElementById("saveSoulBtn").addEventListener("click", async () => {
+        const form = new FormData();
+        form.append("style", document.getElementById("soulStyle").value || "");
+        const res = await csrfFetch("/chat/soul/set", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        await loadSoul();
+      });
+
+      document.getElementById("clearSoulBtn").addEventListener("click", async () => {
+        document.getElementById("soulStyle").value = "";
+        const form = new FormData();
+        form.append("style", "");
+        const res = await csrfFetch("/chat/soul/set", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        await loadSoul();
+      });
+
+      async function loadWellness() {
+        const res = await fetch("/chat/wellness");
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        const s = data.settings || {};
+        document.getElementById("wellnessEnabled").checked = !!s.enabled;
+        document.getElementById("wellnessEveryMsgs").value = Number(s.every_user_msgs || 6);
+        document.getElementById("wellnessMinMinutes").value = Number(s.min_minutes || 45);
+        document.getElementById("wellnessHint").textContent = s.enabled
+          ? `Enabled: every ${s.every_user_msgs} msgs, ${s.min_minutes} min gap.`
+          : "Disabled.";
+      }
+
+      document.getElementById("saveWellnessBtn").addEventListener("click", async () => {
+        const every = Math.max(1, parseInt(document.getElementById("wellnessEveryMsgs").value || "6", 10) || 6);
+        const mins = Math.max(1, parseInt(document.getElementById("wellnessMinMinutes").value || "45", 10) || 45);
+        const form = new FormData();
+        form.append("enabled", document.getElementById("wellnessEnabled").checked ? "true" : "false");
+        form.append("every_user_msgs", String(every));
+        form.append("min_minutes", String(mins));
+        const res = await csrfFetch("/chat/wellness/set", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        await loadWellness();
+      });
+
+      loadAuthInfo();
+      loadProviderSettings();
+      loadSoul();
+      loadWellness();
+    </script>
+  </body>
+</html>

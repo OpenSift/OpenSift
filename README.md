@@ -65,6 +65,7 @@ This script will:
 - verify Python 3.12+
 - create/activate `.venv`
 - install dependencies (`openai`, `anthropic`, `sentence-transformers`, `-r requirements.txt`)
+- check for missing `claude`/`codex` CLIs and ask whether to install them
 - prompt for API keys/tokens and write `backend/.env`
 - run setup + security audit (`python opensift.py setup --skip-key-prompts --no-launch`)
 - offer launch targets for local gateway/terminal and Docker gateway/terminal
@@ -111,7 +112,9 @@ export OPENSIFT_CODEX_CMD="codex"
 
 If `codex --help` prints `Render your codex`, that executable is a different npm package.
 Set `OPENSIFT_CODEX_CMD` to your ChatGPT Codex CLI executable.
-If `CHATGPT_CODEX_OAUTH_TOKEN` is not set, OpenSift will auto-read Codex credentials from `~/.codex/auth.json`.
+If `CHATGPT_CODEX_OAUTH_TOKEN` is not set, OpenSift will auto-read Codex credentials from:
+- `/app/.codex/auth.json` (Docker-first default)
+- `~/.codex/auth.json` (host/user fallback)
 
 If no provider is configured, OpenSift will still retrieve relevant passages but won’t generate AI summaries.
 
@@ -132,6 +135,7 @@ python opensift.py setup
 This workflow lets users:
 - Enter/update API keys and tokens (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CHATGPT_CODEX_OAUTH_TOKEN`)
 - Save settings to `backend/.env`
+- Prompt to install missing Claude Code / ChatGPT Codex CLIs (or skip)
 - Choose launch mode: `gateway`, `ui`, `terminal`, or `both`
 
 ✅ Gateway runner (recommended for local orchestration)
@@ -211,10 +215,10 @@ Useful Docker commands:
 
 ```bash
 # Start in background
-OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" docker compose up -d --build opensift-gateway
+docker compose up -d --build opensift-gateway
 
 # Start interactive terminal in Docker
-OPENSIFT_UID="$(id -u)" OPENSIFT_GID="$(id -g)" docker compose run --rm opensift-terminal
+docker compose run --rm opensift-terminal
 
 # Stop
 docker compose down
@@ -224,11 +228,40 @@ docker compose logs -f opensift-gateway
 ```
 
 Docker notes:
+- Docker publishes OpenSift on loopback by default (`127.0.0.1:8001`).
+- You can override bind address when needed (for relay/proxy testing):
+  - `OPENSIFT_BIND_ADDR=0.0.0.0 docker compose up --build`
+- Claude Code and Codex CLIs are installed in Docker image builds by default.
+  - Disable either install if needed:
+    - `INSTALL_CLAUDE_CODE_CLI=false docker compose up --build`
+    - `INSTALL_CODEX_CLI=false docker compose up --build`
+  - Override npm package names if your org mirrors npm packages:
+    - `CLAUDE_CODE_NPM_PACKAGE=@anthropic-ai/claude-code`
+    - `CODEX_NPM_PACKAGE=@openai/codex`
+- Host-installed CLIs are not visible inside containers unless installed in the image.
+- CLI auth state is persisted under `backend/.codex` and `backend/.claude`.
+  - Docker defaults `OPENSIFT_CODEX_AUTH_PATH=/app/.codex/auth.json`.
+  - Docker sets `OPENSIFT_CODEX_SKIP_GIT_REPO_CHECK=true` so Codex can run under `/app` even when it is not a git-trusted workspace.
+  - Device auth inside Docker:
+    - `docker exec -it opensift-gateway sh -lc 'HOME=/app codex login --device-auth'`
+    - `docker exec -it opensift-gateway claude setup-token`
+- If traffic must arrive from known relay/proxy egress IPs, allowlist them:
+  - `OPENSIFT_TRUSTED_CLIENT_IPS=143.204.130.84`
+  - or CIDR list: `OPENSIFT_TRUSTED_CLIENT_CIDRS=143.204.128.0/20`
+- OpenSift can still make outbound calls (e.g., Hugging Face model download) while inbound access remains localhost-guarded.
+- Embeddings warmup is enabled by default in Docker to avoid first-chat retrieval interruptions:
+  - `OPENSIFT_PRELOAD_EMBEDDINGS=true`
 - The container mounts `./backend` to `/app`, so local state persists:
   - `.chroma`, `.opensift_sessions`, `.opensift_library`, `.opensift_quiz_attempts`, `.opensift_flashcards`, `.opensift_auth.json`, `SOUL.md`
 - Provider keys/tokens are loaded from `backend/.env` via `env_file`.
 - ChatGPT Codex auto-discovery still works if auth is provided by env (`CHATGPT_CODEX_OAUTH_TOKEN`).
 - Gateway mode in Docker starts UI + MCP automatically.
+
+Image versioning notes:
+- Local `docker compose` builds are tagged as `opensift-opensift-gateway:latest`.
+- For external publishing, use version-aligned tags, e.g.:
+  - `ghcr.io/opensift/opensift-gateway:1.3.1-alpha`
+  - `ghcr.io/opensift/opensift-gateway:latest`
 
 
 Open:
@@ -341,7 +374,7 @@ OPENSIFT_BREAK_REMINDER_MIN_MINUTES=45
 CHATGPT_CODEX_OAUTH_TOKEN=
 OPENSIFT_CODEX_CMD=codex
 OPENSIFT_CODEX_ARGS=
-OPENSIFT_CODEX_AUTH_PATH=~/.codex/auth.json
+OPENSIFT_CODEX_AUTH_PATH=/app/.codex/auth.json
 OPENSIFT_MAX_URL_REDIRECTS=5
 ```
 

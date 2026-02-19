@@ -38,3 +38,20 @@ def test_security_audit_report_format_contains_summary(tmp_path: Path, monkeypat
     assert "OpenSift Security Audit" in report
     assert "Summary:" in report
 
+
+def test_security_audit_flags_template_csrf_issues(tmp_path: Path, monkeypatch) -> None:
+    templates = tmp_path / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+    bad = templates / "chat.html"
+    bad.write_text(
+        "<html><script>fetch('/x',{method:\"POST\"});"
+        "const a=document.createElement('div');a.innerHTML='unsafe';</script></html>",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("OPENSIFT_CODEX_AUTH_PATH", raising=False)
+    findings, rc = run_security_audit(tmp_path, fix_perms=False)
+    _ = rc
+    checks = {(f.check, f.path): f for f in findings}
+    assert any(f.check == "template_innerhtml_risk" and f.severity == "high" for f in findings)
+    assert any(f.check == "template_csrf_post_pattern" and f.severity == "high" for f in findings)

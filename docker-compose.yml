@@ -3,16 +3,31 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        INSTALL_CLAUDE_CODE_CLI: "${INSTALL_CLAUDE_CODE_CLI:-true}"
+        INSTALL_CODEX_CLI: "${INSTALL_CODEX_CLI:-true}"
+        CLAUDE_CODE_NPM_PACKAGE: "${CLAUDE_CODE_NPM_PACKAGE:-@anthropic-ai/claude-code}"
+        CODEX_NPM_PACKAGE: "${CODEX_NPM_PACKAGE:-@openai/codex}"
     container_name: opensift-gateway
     ports:
-      - "8001:8001"
+      - "${OPENSIFT_BIND_ADDR:-127.0.0.1}:8001:8001"
     working_dir: /app
-    user: "${OPENSIFT_UID:-0}:${OPENSIFT_GID:-0}"
     command: ["python", "opensift.py", "gateway", "--host", "0.0.0.0", "--port", "8001", "--with-mcp", "--health-timeout", "30"]
     env_file:
       - backend/.env
     environment:
+      HOME: /home/opensift
+      OPENSIFT_CODEX_AUTH_PATH: /app/.codex/auth.json
+      OPENSIFT_CODEX_SKIP_GIT_REPO_CHECK: "true"
       OPENSIFT_LOG_DIR: /app/.opensift_logs
+      OPENSIFT_ALLOW_PRIVATE_CLIENTS: "true"
+      OPENSIFT_PRELOAD_EMBEDDINGS: "true"
+      ANONYMIZED_TELEMETRY: "False"
+      XDG_CACHE_HOME: /tmp/.cache
+      HF_HOME: /tmp/.cache/huggingface
+      TRANSFORMERS_CACHE: /tmp/.cache/huggingface/transformers
+      TORCH_HOME: /tmp/.cache/torch
+      TORCHINDUCTOR_CACHE_DIR: /tmp/.cache/torch/inductor
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -22,6 +37,8 @@ services:
     volumes:
       # Mount backend source/state so sessions, Chroma, auth, and SOUL persist.
       - ./backend:/app
+      - ./backend/.codex:/home/opensift/.codex
+      - ./backend/.claude:/home/opensift/.claude
     healthcheck:
       test:
         - CMD
@@ -38,14 +55,29 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        INSTALL_CLAUDE_CODE_CLI: "${INSTALL_CLAUDE_CODE_CLI:-true}"
+        INSTALL_CODEX_CLI: "${INSTALL_CODEX_CLI:-true}"
+        CLAUDE_CODE_NPM_PACKAGE: "${CLAUDE_CODE_NPM_PACKAGE:-@anthropic-ai/claude-code}"
+        CODEX_NPM_PACKAGE: "${CODEX_NPM_PACKAGE:-@openai/codex}"
     container_name: opensift-terminal
     working_dir: /app
-    user: "${OPENSIFT_UID:-0}:${OPENSIFT_GID:-0}"
     command: ["python", "opensift.py", "terminal", "--provider", "claude_code"]
     env_file:
       - backend/.env
     environment:
+      HOME: /home/opensift
+      OPENSIFT_CODEX_AUTH_PATH: /app/.codex/auth.json
+      OPENSIFT_CODEX_SKIP_GIT_REPO_CHECK: "true"
       OPENSIFT_LOG_DIR: /app/.opensift_logs
+      OPENSIFT_ALLOW_PRIVATE_CLIENTS: "true"
+      OPENSIFT_PRELOAD_EMBEDDINGS: "true"
+      ANONYMIZED_TELEMETRY: "False"
+      XDG_CACHE_HOME: /tmp/.cache
+      HF_HOME: /tmp/.cache/huggingface
+      TRANSFORMERS_CACHE: /tmp/.cache/huggingface/transformers
+      TORCH_HOME: /tmp/.cache/torch
+      TORCHINDUCTOR_CACHE_DIR: /tmp/.cache/torch/inductor
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -54,6 +86,8 @@ services:
       - /tmp
     volumes:
       - ./backend:/app
+      - ./backend/.codex:/home/opensift/.codex
+      - ./backend/.claude:/home/opensift/.claude
     depends_on:
       opensift-gateway:
         condition: service_healthy

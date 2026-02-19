@@ -14,3 +14,14 @@ def test_chat_template_posts_use_csrf_fetch() -> None:
     # Ensure there are no raw POST fetch calls bypassing csrfFetch.
     raw_post_fetch = re.findall(r"fetch\([^)]*\{[^}]*method:\s*\"POST\"", content, flags=re.DOTALL)
     assert not raw_post_fetch
+
+
+def test_settings_template_posts_use_csrf_fetch() -> None:
+    path = Path(__file__).resolve().parents[1] / "templates" / "settings.html"
+    content = path.read_text(encoding="utf-8")
+
+    assert 'function csrfFetch(url, options = {})' in content
+    assert 'data-csrf="{{ csrf_token }}"' in content
+
+    raw_post_fetch = re.findall(r"fetch\([^)]*\{[^}]*method:\s*\"POST\"", content, flags=re.DOTALL)
+    assert not raw_post_fetch

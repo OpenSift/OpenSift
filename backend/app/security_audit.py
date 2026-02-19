@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -161,6 +162,133 @@ def _default_codex_auth_path(project_root: Path) -> Path:
     return Path.home() / ".codex" / "auth.json"
 
 
+def _check_template_xss_csrf(project_root: Path, findings: List[AuditFinding]) -> None:
+    templates = (
+        project_root / "templates" / "chat.html",
+        project_root / "templates" / "settings.html",
+    )
+    for path in templates:
+        if not path.exists():
+            findings.append(
+                AuditFinding(
+                    severity="info",
+                    check="template_exists",
+                    message="Template not present; skipping static XSS/CSRF checks.",
+                    path=str(path),
+                )
+            )
+            continue
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            findings.append(
+                AuditFinding(
+                    severity="warn",
+                    check="template_read_failed",
+                    message="Could not read template for static XSS/CSRF checks.",
+                    path=str(path),
+                )
+            )
+            continue
+
+        innerhtml_assignments = re.findall(r"innerHTML\s*=\s*([^;\n]+)", content)
+        dangerous_innerhtml = []
+        for rhs in innerhtml_assignments:
+            v = (rhs or "").strip()
+            if v in ('""', "''"):
+                continue
+            dangerous_innerhtml.append(v)
+        if dangerous_innerhtml:
+            findings.append(
+                AuditFinding(
+                    severity="high",
+                    check="template_innerhtml_risk",
+                    message="Template contains non-empty innerHTML assignments; review for XSS risk.",
+                    path=str(path),
+                    recommended="Prefer DOM creation + textContent for untrusted data.",
+                )
+            )
+        else:
+            findings.append(
+                AuditFinding(
+                    severity="info",
+                    check="template_innerhtml_risk",
+                    message="No non-empty innerHTML assignments detected.",
+                    path=str(path),
+                )
+            )
+
+        has_csrf_fetch = "function csrfFetch(url, options = {})" in content
+        has_csrf_attr = 'data-csrf="{{ csrf_token }}"' in content
+        raw_post_fetch = re.findall(r"fetch\([^)]*\{[^}]*method:\s*\"POST\"", content, flags=re.DOTALL)
+        if (not has_csrf_fetch) or (not has_csrf_attr) or bool(raw_post_fetch):
+            findings.append(
+                AuditFinding(
+                    severity="high",
+                    check="template_csrf_post_pattern",
+                    message="Template may have POST fetches bypassing csrfFetch or missing CSRF wiring.",
+                    path=str(path),
+                    recommended="Use csrfFetch for all POSTs and include data-csrf token binding.",
+                )
+            )
+        else:
+            findings.append(
+                AuditFinding(
+                    severity="info",
+                    check="template_csrf_post_pattern",
+                    message="Template POST requests appear to use csrfFetch with CSRF token binding.",
+                    path=str(path),
+                )
+            )
+
+
+def _check_compose_security(project_root: Path, findings: List[AuditFinding]) -> None:
+    compose_path = project_root.parent / "docker-compose.yml"
+    if not compose_path.exists():
+        findings.append(
+            AuditFinding(
+                severity="info",
+                check="compose_exists",
+                message="docker-compose.yml not found; skipping container static checks.",
+                path=str(compose_path),
+            )
+        )
+        return
+    try:
+        content = compose_path.read_text(encoding="utf-8")
+    except Exception:
+        findings.append(
+            AuditFinding(
+                severity="warn",
+                check="compose_read_failed",
+                message="Could not read docker-compose.yml.",
+                path=str(compose_path),
+            )
+        )
+        return
+
+    if "${OPENSIFT_UID:-0}" in content or "${OPENSIFT_GID:-0}" in content:
+        findings.append(
+            AuditFinding(
+                severity="warn",
+                check="compose_user_default_root",
+                message="Compose defaults to root UID/GID when OPENSIFT_UID/GID are unset.",
+                path=str(compose_path),
+                recommended="Use non-root defaults (e.g. 1000) or set OPENSIFT_UID/GID explicitly.",
+            )
+        )
+    else:
+        findings.append(
+            AuditFinding(
+                severity="info",
+                check="compose_user_default_root",
+                message="Compose file does not default container user to root UID/GID.",
+                path=str(compose_path),
+            )
+        )
+
+
 def run_security_audit(project_root: Path, fix_perms: bool = False) -> Tuple[List[AuditFinding], int]:
     findings: List[AuditFinding] = []
 
@@ -184,6 +312,9 @@ def run_security_audit(project_root: Path, fix_perms: bool = False) -> Tuple[Lis
 
     for p in sensitive_dirs:
         _check_sensitive_dir(p, findings, fix_perms=fix_perms)
+
+    _check_template_xss_csrf(project_root, findings)
+    _check_compose_security(project_root, findings)
 
     geteuid = getattr(os, "geteuid", None)
     is_root = bool(callable(geteuid) and geteuid() == 0)

@@ -16,10 +16,17 @@ from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_t
 from app.llm import embed_texts
 from app.logging_utils import configure_logging
 from app.providers import (
+    codex_auth_detected,
+    codex_cli_available,
+    DEFAULT_CODEX_MODEL,
     DEFAULT_CLAUDE_MODEL,
     DEFAULT_OPENAI_MODEL,
     SUPPORTED_CLAUDE_MODELS,
+    SUPPORTED_OPENAI_MODELS,
+    SUPPORTED_THINKING_LEVELS,
+    claude_thinking_budget,
     build_prompt,
+    claude_code_cli_available,
     generate_with_claude,
     generate_with_claude_code,
     generate_with_codex,
@@ -48,6 +55,7 @@ class ChatConfig:
     true_streaming: bool = True
     show_thinking: bool = True
     thinking_enabled: bool = False
+    thinking_level: str = "medium"
     show_sources: bool = True
 
 
@@ -67,6 +75,7 @@ Commands:
   /true-stream on|off
   /show-thinking on|off
   /thinking on|off
+  /thinking-level low|medium|high|extra_high
   /style                         Show global study style
   /style set <text>              Set global study style
   /style clear                   Clear global study style
@@ -101,10 +110,12 @@ def _print_banner(cfg: ChatConfig) -> None:
     print(
         f"Owner: {cfg.owner} | Mode: {cfg.mode} | Provider: {cfg.provider} | k={cfg.k} | "
         f"history={cfg.history_turns} | stream={'on' if cfg.stream else 'off'} | "
-        f"true_stream={'on' if cfg.true_streaming else 'off'} | thinking={'on' if cfg.thinking_enabled else 'off'}"
+        f"true_stream={'on' if cfg.true_streaming else 'off'} | thinking={'on' if cfg.thinking_enabled else 'off'} "
+        f"({cfg.thinking_level})"
     )
     print(f"Study style: {'configured' if style else 'default/none'}")
     print(f"Defaults: OpenAI={DEFAULT_OPENAI_MODEL} | Claude={DEFAULT_CLAUDE_MODEL}")
+    print(f"OpenAI/Codex models: {', '.join(SUPPORTED_OPENAI_MODELS)}")
     print(f"Claude models: {', '.join(SUPPORTED_CLAUDE_MODELS)}")
     print("Type /help for commands. Type /quit to exit.")
     print("=" * 72 + "\n")
@@ -199,20 +210,56 @@ def _build_history_block(history: List[Dict[str, Any]], turns: int) -> str:
     return "\n".join(lines).strip()
 
 
+def _resolve_provider_model_pair(provider: str, model: str) -> tuple[str, str, str]:
+    p = (provider or "").strip().lower()
+    m = (model or "").strip()
+    if not m:
+        return p, m, ""
+    if p in ("openai", "codex") and m.startswith("claude-"):
+        return "claude", m, f"Model '{m}' is Claude-family; switching provider to Claude API."
+    if p in ("claude", "claude_code") and m.startswith("gpt-"):
+        target = "codex" if (codex_auth_detected() and codex_cli_available()) else "openai"
+        return target, m, f"Model '{m}' is GPT-family; switching provider to {target}."
+    return p, m, ""
+
+
 def _run_generate(cfg: ChatConfig, prompt: str) -> str:
-    if cfg.provider == "openai":
-        return generate_with_openai(prompt, model=cfg.model or DEFAULT_OPENAI_MODEL)
-    if cfg.provider == "claude":
+    provider, model_override, _note = _resolve_provider_model_pair(cfg.provider, cfg.model)
+    if provider == "claude_code":
+        if not claude_code_cli_available():
+            if os.getenv("ANTHROPIC_API_KEY", "").strip():
+                logger.warning("cli_claude_code_unavailable_fallback_to_claude_api model=%s", model_override or DEFAULT_CLAUDE_MODEL)
+                return generate_with_claude(
+                    prompt,
+                    model=model_override or DEFAULT_CLAUDE_MODEL,
+                    thinking_enabled=cfg.thinking_enabled,
+                    thinking_level=cfg.thinking_level,
+                )
+            raise RuntimeError(
+                "Claude Code CLI not found and no ANTHROPIC_API_KEY configured. "
+                "Install Claude Code or set OPENSIFT_CLAUDE_CODE_CMD, or configure Anthropic API key."
+            )
+        return generate_with_claude_code(prompt, model=model_override or DEFAULT_CLAUDE_MODEL)
+    if provider == "codex":
+        if not codex_cli_available():
+            if os.getenv("OPENAI_API_KEY", "").strip():
+                logger.warning("cli_codex_unavailable_fallback_to_openai_api model=%s", model_override or DEFAULT_OPENAI_MODEL)
+                return generate_with_openai(prompt, model=model_override or DEFAULT_OPENAI_MODEL)
+            raise RuntimeError(
+                "Codex CLI not found and no OPENAI_API_KEY configured. "
+                "Install Codex CLI or set OPENSIFT_CODEX_CMD, or configure OpenAI API key."
+            )
+        return generate_with_codex(prompt, model=model_override or DEFAULT_CODEX_MODEL)
+    if provider == "openai":
+        return generate_with_openai(prompt, model=model_override or DEFAULT_OPENAI_MODEL)
+    if provider == "claude":
         return generate_with_claude(
             prompt,
-            model=cfg.model or DEFAULT_CLAUDE_MODEL,
+            model=model_override or DEFAULT_CLAUDE_MODEL,
             thinking_enabled=cfg.thinking_enabled,
+            thinking_level=cfg.thinking_level,
         )
-    if cfg.provider == "claude_code":
-        return generate_with_claude_code(prompt, model=cfg.model or DEFAULT_CLAUDE_MODEL)
-    if cfg.provider == "codex":
-        return generate_with_codex(prompt, model=cfg.model or DEFAULT_OPENAI_MODEL)
-    raise RuntimeError(f"Unknown provider: {cfg.provider}")
+    raise RuntimeError(f"Unknown provider: {provider}")
 
 
 async def _stream_openai(prompt: str, model: str) -> AsyncGenerator[str, None]:
@@ -232,7 +279,12 @@ async def _stream_openai(prompt: str, model: str) -> AsyncGenerator[str, None]:
         _ = s.get_final_response()
 
 
-async def _stream_anthropic(prompt: str, model: str, thinking_enabled: bool = False) -> AsyncGenerator[str, None]:
+async def _stream_anthropic(
+    prompt: str,
+    model: str,
+    thinking_enabled: bool = False,
+    thinking_level: str = "medium",
+) -> AsyncGenerator[str, None]:
     try:
         import anthropic  # type: ignore
     except Exception:
@@ -245,7 +297,7 @@ async def _stream_anthropic(prompt: str, model: str, thinking_enabled: bool = Fa
         "messages": [{"role": "user", "content": prompt}],
     }
     if thinking_enabled:
-        params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+        params["thinking"] = {"type": "enabled", "budget_tokens": claude_thinking_budget(thinking_level)}
 
     try:
         with client.messages.stream(**params) as stream:
@@ -364,31 +416,49 @@ async def answer(
     study_style = get_global_style()
     prompt = build_prompt(mode=cfg.mode, query=query_for_prompt, passages=passages, study_style=study_style)
 
+    effective_provider, effective_model, provider_note = _resolve_provider_model_pair(cfg.provider, cfg.model)
+    if cfg.show_thinking and provider_note:
+        print(f"STATUS: {provider_note}")
+
     if cfg.show_thinking:
-        if cfg.provider == "claude" and cfg.thinking_enabled:
-            print("STATUS: Thinking... (Claude extended thinking enabled)")
+        if effective_provider in ("claude", "claude_code") and cfg.thinking_enabled:
+            print(f"STATUS: Thinking... (Claude level: {cfg.thinking_level.replace('_', ' ')})")
         else:
             print("STATUS: Thinking...")
     print("OPENSIFT:")
     assistant_text = ""
 
-    if cfg.stream and cfg.provider in ("openai", "claude", "codex") and cfg.true_streaming:
+    if effective_provider == "claude_code" and not claude_code_cli_available() and os.getenv("ANTHROPIC_API_KEY", "").strip():
+        effective_provider = "claude"
+        if cfg.show_thinking:
+            print("STATUS: Claude Code CLI unavailable, falling back to Claude API.")
+    if effective_provider == "codex" and not codex_cli_available() and os.getenv("OPENAI_API_KEY", "").strip():
+        effective_provider = "openai"
+        if cfg.show_thinking:
+            print("STATUS: Codex CLI unavailable, falling back to OpenAI API.")
+
+    if cfg.stream and effective_provider in ("openai", "claude", "codex") and cfg.true_streaming:
         try:
-            if cfg.provider == "openai":
-                model = cfg.model or DEFAULT_OPENAI_MODEL
+            if effective_provider == "openai":
+                model = effective_model or DEFAULT_OPENAI_MODEL
                 async for delta in _stream_openai(prompt, model):
                     sys.stdout.write(delta)
                     sys.stdout.flush()
                     assistant_text += delta
-            elif cfg.provider == "codex":
-                model = cfg.model or DEFAULT_OPENAI_MODEL
+            elif effective_provider == "codex":
+                model = effective_model or DEFAULT_CODEX_MODEL
                 async for delta in _stream_codex(prompt, model):
                     sys.stdout.write(delta)
                     sys.stdout.flush()
                     assistant_text += delta
             else:
-                model = cfg.model or DEFAULT_CLAUDE_MODEL
-                async for delta in _stream_anthropic(prompt, model, thinking_enabled=cfg.thinking_enabled):
+                model = effective_model or DEFAULT_CLAUDE_MODEL
+                async for delta in _stream_anthropic(
+                    prompt,
+                    model,
+                    thinking_enabled=cfg.thinking_enabled,
+                    thinking_level=cfg.thinking_level,
+                ):
                     sys.stdout.write(delta)
                     sys.stdout.flush()
                     assistant_text += delta
@@ -569,6 +639,15 @@ async def repl(cfg: ChatConfig) -> None:
                 print(f"✅ thinking: {'on' if cfg.thinking_enabled else 'off'}")
                 continue
 
+            if cmd == "/thinking-level" and len(parts) >= 2:
+                v = parts[1].strip().lower().replace("-", "_")
+                if v not in SUPPORTED_THINKING_LEVELS:
+                    print("⚠️ /thinking-level low|medium|high|extra_high")
+                    continue
+                cfg.thinking_level = v
+                print(f"✅ thinking-level: {cfg.thinking_level}")
+                continue
+
             if cmd == "/style":
                 if len(parts) == 1:
                     style = get_global_style()
@@ -680,6 +759,12 @@ def main() -> None:
     parser.add_argument("--no-true-stream", action="store_true", help="Disable provider-native true streaming")
     parser.add_argument("--no-show-thinking", action="store_true", help="Hide retrieval/thinking status lines")
     parser.add_argument("--thinking", action="store_true", help="Enable Claude extended thinking where supported")
+    parser.add_argument(
+        "--thinking-level",
+        default="medium",
+        choices=list(SUPPORTED_THINKING_LEVELS),
+        help="Claude thinking level",
+    )
     parser.add_argument("--no-sources", action="store_true", help="Disable sources printing")
     args = parser.parse_args()
 
@@ -695,6 +780,7 @@ def main() -> None:
         true_streaming=not args.no_true_stream,
         show_thinking=not args.no_show_thinking,
         thinking_enabled=bool(args.thinking),
+        thinking_level=args.thinking_level,
         show_sources=not args.no_sources,
     )
 

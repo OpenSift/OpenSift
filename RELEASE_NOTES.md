@@ -1,9 +1,45 @@
 # OpenSift Release Notes
 
-## v1.2.0-alpha
+## v1.3.1-alpha
 Release date: 2026-02-19
 
 This release adds cross-surface thinking/streaming controls, a new security audit system, and a more complete Docker + setup onboarding path centered around the OpenSift gateway.
+
+### Hotfix updates (2026-02-19)
+- Docker provider install UX and diagnostics:
+  - Added Settings actions to install `claude` / `claude-code` / `codex` CLIs inside Docker.
+  - Added install progress stream with percent/ETA and persistent per-install logs.
+- Docker auth/token path reliability:
+  - Added Docker-first Codex auth discovery from `/app/.codex/auth.json` (with `~/.codex/auth.json` fallback).
+  - Defaulted `OPENSIFT_CODEX_AUTH_PATH=/app/.codex/auth.json` in compose.
+  - Added writable runtime home handling for non-root container user and mounted auth dirs (`backend/.codex`, `backend/.claude`).
+- Codex CLI trust-directory compatibility:
+  - Added `--skip-git-repo-check` support for Docker runs by default.
+  - Added Codex CLI capability detection so flag placement matches installed CLI behavior.
+- Streaming and generation resilience:
+  - Hardened `claude` CLI generation path to treat exit-0/empty-stdout as failure and retry invocation variants.
+  - Added provider fallback chain when a selected provider fails at generation time (Claude Code -> Claude API / Codex / OpenAI).
+  - Added deterministic context-only fallback so chat always returns a usable answer from retrieved passages when external generation fails.
+- Provider transparency and UI debugging:
+  - Chat stream now reports requested vs active provider/model in status output and failure messages.
+  - Added client-side provider/model normalization to avoid silent provider switches caused by incompatible model selections.
+  - Added persistent status timeline in chat bubbles so transient runtime errors are visible after stream completion.
+- Container/runtime stability:
+  - Added fallback SOUL path handling for container environments with invalid home directories (e.g., `/nonexistent`) to prevent stream-time crashes.
+
+### Upgrade checklist (from earlier alpha builds)
+1. Rebuild and restart containers:
+   - `docker compose down`
+   - `docker compose up --build -d opensift-gateway`
+2. Re-auth provider CLIs inside Docker (if using CLI providers):
+   - Codex: `docker exec -it opensift-gateway sh -lc 'HOME=/app codex login --device-auth'`
+   - Claude Code: `docker exec -it opensift-gateway claude setup-token`
+3. Verify provider readiness in UI:
+   - Open `http://127.0.0.1:8001/settings`
+   - Confirm provider status and command paths on the Providers tab
+4. Run a chat smoke test:
+   - Send one message with `provider=codex` and `model=Auto`
+   - Confirm status log shows requested/active provider and returns a non-empty response
 
 ### Highlights
 - Added CLI parity for thinking and streaming controls to match the web UI.
@@ -21,6 +57,8 @@ This release adds cross-surface thinking/streaming controls, a new security audi
 - New setup behavior:
   - `python opensift.py setup --no-launch`
   - Setup now runs a security audit before launch decisions
+  - Setup now checks for missing `claude` / `codex` CLIs and prompts to install them
+  - New setup flag: `python opensift.py setup --skip-cli-install-prompts`
 - New automated tests:
   - `backend/tests/test_security_audit.py`
 
@@ -54,9 +92,21 @@ This release adds cross-surface thinking/streaming controls, a new security audi
   - Codex auth file path (default `~/.codex/auth.json`)
   - debug logging and Docker socket exposure warnings
 - Setup now auto-fixes restrictive permissions where possible (`chmod 600/700` policy).
+- Post-audit hardening update:
+  - Gateway now applies `.env` before spawning managed UI/MCP processes.
+  - `opensift.py` setup writes `.env` with restrictive permissions (`0600`).
+  - Docker compose no longer defaults runtime user to root when UID/GID env vars are unset.
+  - Security audit now includes static template checks for:
+    - XSS regression patterns (`innerHTML` non-empty assignments)
+    - CSRF POST safety patterns (`csrfFetch` + CSRF token binding)
+  - Added/expanded regression tests:
+    - `backend/tests/test_security_audit.py`
+    - `backend/tests/test_chat_csrf_template.py`
+    - `backend/tests/test_settings_and_stream_ui.py`
+  - Latest backend test status after this hardening pass: 38 passing tests.
 
 ### Versioning
-- Bumped app version to `1.2.0-alpha` in:
+- Bumped app version to `1.3.1-alpha` in:
   - `backend/opensift.py`
   - `backend/ui_app.py`
 
@@ -120,12 +170,15 @@ This release focuses on comprehensive hardening of the web app and data pipeline
   - startup log token non-exposure
   - session import replace/merge persistence behavior
   - NDJSON streaming completion + persisted history behavior
+- Added UI integration tests in `backend/tests/test_settings_and_stream_ui.py` for:
+  - `/settings` tabbed page render and control presence (Auth/SOUL/Wellness/Ingest)
+  - `/chat/stream` provider-model discrepancy status events (e.g., OpenAI + Claude model auto-switch messaging)
 - Existing hardening tests remain active:
   - `backend/tests/test_chat_template_safety.py`
   - `backend/tests/test_chat_csrf_template.py`
   - `backend/tests/test_ingest_url_safety.py`
   - `backend/tests/test_ingest_redirect_safety.py`
-- Current backend test suite status: 12 passing tests.
+- Current backend test suite status: 36 passing tests.
 
 ### Configuration Notes
 Security/reliability-sensitive controls used in this release:

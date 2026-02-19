@@ -13,11 +13,34 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 # Default models (upgraded)
 # ---------------------------------------------------------------------------
 DEFAULT_OPENAI_MODEL = "gpt-5.2"
+DEFAULT_CODEX_MODEL = "gpt-5.3-codex"
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 SUPPORTED_CLAUDE_MODELS = (
     "claude-sonnet-4-6",
     "claude-sonnet-4-5",
 )
+SUPPORTED_OPENAI_MODELS = (
+    "gpt-5.3-codex",
+    "gpt-5.2",
+)
+SUPPORTED_THINKING_LEVELS = ("low", "medium", "high", "extra_high")
+THINKING_BUDGETS = {
+    "low": 1024,
+    "medium": 2048,
+    "high": 4096,
+    "extra_high": 8192,
+}
+
+
+def normalize_thinking_level(level: str) -> str:
+    s = (level or "medium").strip().lower().replace("-", "_")
+    if s not in SUPPORTED_THINKING_LEVELS:
+        return "medium"
+    return s
+
+
+def claude_thinking_budget(level: str) -> int:
+    return int(THINKING_BUDGETS.get(normalize_thinking_level(level), THINKING_BUDGETS["medium"]))
 
 
 def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]], study_style: str = "") -> str:
@@ -111,7 +134,12 @@ def generate_with_openai(prompt: str, model: Optional[str] = None) -> str:
     return "".join(parts).strip()
 
 
-def generate_with_claude(prompt: str, model: Optional[str] = None, thinking_enabled: bool = False) -> str:
+def generate_with_claude(
+    prompt: str,
+    model: Optional[str] = None,
+    thinking_enabled: bool = False,
+    thinking_level: str = "medium",
+) -> str:
     """
     Non-streaming generation via Anthropic SDK.
     Default model: Claude Sonnet 4.6
@@ -130,7 +158,7 @@ def generate_with_claude(prompt: str, model: Optional[str] = None, thinking_enab
         "messages": [{"role": "user", "content": prompt}],
     }
     if thinking_enabled:
-        params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+        params["thinking"] = {"type": "enabled", "budget_tokens": claude_thinking_budget(thinking_level)}
 
     try:
         msg = client.messages.create(**params)
@@ -151,6 +179,21 @@ def generate_with_claude(prompt: str, model: Optional[str] = None, thinking_enab
 
 def _which_cmd(cmd: str) -> Optional[str]:
     return shutil.which(cmd)
+
+
+def claude_code_cli_available() -> bool:
+    cmd = os.environ.get("OPENSIFT_CLAUDE_CODE_CMD", "claude").strip() or "claude"
+    return bool(_which_cmd(cmd))
+
+
+def codex_cli_available() -> bool:
+    cmd = os.environ.get("OPENSIFT_CODEX_CMD", "codex").strip() or "codex"
+    exe = _which_cmd(cmd)
+    if not exe:
+        return False
+    if _looks_like_wrong_codex_cli(cmd):
+        return False
+    return True
 
 
 def _looks_like_wrong_codex_cli(cmd: str) -> bool:
@@ -180,6 +223,21 @@ def _parse_cli_args(raw: str) -> List[str]:
         return shlex.split(raw or "")
     except Exception:
         return [a for a in (raw or "").split(" ") if a]
+
+
+def _codex_exec_supports_skip_git_repo_check(exe: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [exe, "exec", "--help"],
+            text=True,
+            capture_output=True,
+            timeout=4,
+            env=os.environ.copy(),
+        )
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or "")).lower()
+        return "--skip-git-repo-check" in out
+    except Exception:
+        return False
 
 
 def _run_subprocess(args: List[str], stdin_text: str, timeout_s: int = 180, env: Optional[Dict[str, str]] = None) -> str:
@@ -246,20 +304,36 @@ def _load_codex_oauth_token() -> str:
     if env_token:
         return env_token
 
-    # 2) auto-discover from Codex auth file
-    auth_path = _coerce_str(os.environ.get("OPENSIFT_CODEX_AUTH_PATH", "")) or os.path.join(
-        os.path.expanduser("~"),
-        ".codex",
-        "auth.json",
+    # 2) auto-discover from Codex auth file(s).
+    # Docker-first default for OpenSift containerized usage, then user home fallback.
+    override_path = _coerce_str(os.environ.get("OPENSIFT_CODEX_AUTH_PATH", ""))
+    paths: List[str] = []
+    if override_path:
+        paths.append(os.path.expanduser(override_path))
+    paths.extend(
+        [
+            "/app/.codex/auth.json",
+            os.path.join(os.path.expanduser("~"), ".codex", "auth.json"),
+        ]
     )
-    if not os.path.exists(auth_path):
-        return ""
-    try:
-        with open(auth_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return _find_token_in_obj(data)
-    except Exception:
-        return ""
+
+    seen: set[str] = set()
+    for auth_path in paths:
+        p = os.path.abspath(auth_path)
+        if p in seen:
+            continue
+        seen.add(p)
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            token = _find_token_in_obj(data)
+            if token:
+                return token
+        except Exception:
+            continue
+    return ""
 
 
 def _codex_subprocess_env() -> Dict[str, str]:
@@ -278,18 +352,9 @@ def generate_with_claude_code(prompt: str, model: Optional[str] = None) -> str:
     """
     Best-effort Claude Code integration.
 
-    Assumptions:
-      - You have a Claude Code CLI installed (default command: `claude`)
-      - You've authenticated it already (e.g., setup-token / long-lived token)
-      - The CLI can accept prompt via stdin or an argument
-
-    Configuration:
-      - OPENSIFT_CLAUDE_CODE_CMD: override CLI command name/path (default: claude)
-      - OPENSIFT_CLAUDE_CODE_ARGS: extra args (space-separated) to append (optional)
-
-    Model:
-      - We try to pass `--model <model>` first (common pattern)
-      - If that fails, we retry without model flags
+    We try a sequence of non-interactive invocations first, because invoking
+    `claude` without print/prompt flags can enter interactive mode and return an
+    empty stdout even with exit code 0.
     """
     cmd = os.environ.get("OPENSIFT_CLAUDE_CODE_CMD", "claude").strip()
     extra_args = _parse_cli_args(os.environ.get("OPENSIFT_CLAUDE_CODE_ARGS", "").strip())
@@ -303,18 +368,52 @@ def generate_with_claude_code(prompt: str, model: Optional[str] = None) -> str:
 
     chosen_model = (model or DEFAULT_CLAUDE_MODEL).strip()
 
-    # Try common invocation patterns:
-    # 1) `claude --model <model>` reading prompt from stdin
-    # 2) `claude` reading prompt from stdin (no model flag)
-    #
-    # If your CLI uses a different flag (like `-m`), set OPENSIFT_CLAUDE_CODE_ARGS accordingly.
-    try:
-        args = [exe, "--model", chosen_model, *extra_args]
-        return _run_subprocess(args, prompt)
-    except Exception:
-        # Retry without the model flag to avoid hard coupling to a specific CLI interface
-        args = [exe, *extra_args]
-        return _run_subprocess(args, prompt)
+    # Prefer direct prompt flags (no TTY required), then fall back to stdin forms.
+    # Keep extra args before model flags so users can override behavior explicitly.
+    attempts: List[tuple[List[str], str]] = [
+        ([exe, *extra_args, "--model", chosen_model, "-p", prompt], ""),
+        ([exe, *extra_args, "--model", chosen_model, "--print", prompt], ""),
+        ([exe, *extra_args, "-p", prompt], ""),
+        ([exe, *extra_args, "--print", prompt], ""),
+        ([exe, *extra_args, "--model", chosen_model], prompt),
+        ([exe, *extra_args], prompt),
+    ]
+
+    failures: List[str] = []
+    env = os.environ.copy()
+    for args, stdin_text in attempts:
+        try:
+            proc = subprocess.run(
+                args,
+                input=stdin_text,
+                text=True,
+                capture_output=True,
+                timeout=180,
+                env=env,
+            )
+        except Exception as e:
+            failures.append(f"{' '.join(args[:4])}... -> spawn failed: {e}")
+            continue
+
+        stdout = (proc.stdout or "").strip()
+        stderr = (proc.stderr or "").strip()
+        if proc.returncode != 0:
+            detail = stderr or stdout or f"exit_code={proc.returncode}"
+            failures.append(f"{' '.join(args[:4])}... -> {detail[:220]}")
+            continue
+        if not stdout:
+            # Treat empty output as a hard failure so caller can fall back to a
+            # working provider path instead of silently returning empty text.
+            detail = stderr or "no stdout produced"
+            failures.append(f"{' '.join(args[:4])}... -> empty output ({detail[:220]})")
+            continue
+        return stdout
+
+    detail_blob = " | ".join(failures[-6:]) if failures else "unknown failure"
+    raise RuntimeError(
+        "Claude Code CLI command returned no usable output. "
+        f"Tried multiple invocation modes. Details: {detail_blob}"
+    )
 
 
 def generate_with_codex(prompt: str, model: Optional[str] = None) -> str:
@@ -339,7 +438,8 @@ def generate_with_codex(prompt: str, model: Optional[str] = None) -> str:
             continue
     raise RuntimeError(
         f"Codex CLI command failed for '{cmd}'. "
-        "Check Codex auth (~/.codex/auth.json) or CHATGPT_CODEX_OAUTH_TOKEN, plus OPENSIFT_CODEX_CMD/OPENSIFT_CODEX_ARGS."
+        "Check Codex auth (/app/.codex/auth.json or ~/.codex/auth.json) "
+        "or CHATGPT_CODEX_OAUTH_TOKEN, plus OPENSIFT_CODEX_CMD/OPENSIFT_CODEX_ARGS."
     )
 
 
@@ -359,13 +459,27 @@ def build_codex_cli_invocations(model: Optional[str] = None) -> List[List[str]]:
             "Install the correct ChatGPT Codex CLI and set OPENSIFT_CODEX_CMD to that executable."
         )
 
-    chosen_model = (model or DEFAULT_OPENAI_MODEL).strip()
+    chosen_model = (model or DEFAULT_CODEX_MODEL).strip()
+    skip_git_repo_check = (os.environ.get("OPENSIFT_CODEX_SKIP_GIT_REPO_CHECK", "true").strip().lower() in ("1", "true", "yes", "on"))
+    exec_supports_skip = _codex_exec_supports_skip_git_repo_check(exe)
     # Use non-interactive `exec` to avoid TTY-only interactive mode.
     # "-" means prompt comes from stdin.
-    invocations: List[List[str]] = [
-        [exe, "exec", "--model", chosen_model, *extra_args, "-"],
-        [exe, "exec", *extra_args, "-"],
-    ]
+    invocations: List[List[str]] = []
+
+    if skip_git_repo_check and exec_supports_skip:
+        invocations.extend(
+            [
+                [exe, "exec", "--skip-git-repo-check", "--model", chosen_model, *extra_args, "-"],
+                [exe, "exec", "--skip-git-repo-check", *extra_args, "-"],
+            ]
+        )
+
+    invocations.extend(
+        [
+            [exe, "exec", "--model", chosen_model, *extra_args, "-"],
+            [exe, "exec", *extra_args, "-"],
+        ]
+    )
     return invocations
 
 

@@ -3,32 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>OpenSift</title>
+    <title>OpenSift Chat</title>
     <style>
       :root {
-        --bg: #090d17;
-        --bg-soft: #0e1525;
-        --panel: #101829;
-        --panel-2: #141f34;
-        --panel-3: #1a2742;
+        --bg: #0b1020;
+        --panel: #121a30;
+        --panel-2: #16223d;
         --text: #e9eefc;
-        --muted: #99a6c4;
-        --line: rgba(255,255,255,.10);
-        --line-strong: rgba(255,255,255,.18);
-        --brand: #4a66ff;
-        --brand-soft: rgba(74,102,255,.18);
-        --danger: #d25757;
-        --radius-sm: 10px;
-        --radius-md: 14px;
-        --radius-lg: 18px;
-        --space-1: 6px;
-        --space-2: 10px;
-        --space-3: 14px;
-        --space-4: 18px;
-        --space-5: 24px;
-        --shadow-soft: 0 8px 24px rgba(0,0,0,.26);
+        --muted: #97a6c9;
+        --line: rgba(255, 255, 255, 0.12);
+        --brand: #4f74ff;
+        --danger: #c85b5b;
       }
-
       * { box-sizing: border-box; }
       html, body { height: 100%; }
       body {
@@ -36,18 +22,15 @@
         color: var(--text);
         font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
         background:
-          radial-gradient(1250px 760px at -20% -30%, #273b7a 0%, transparent 56%),
-          radial-gradient(980px 620px at 130% -10%, #22426d 0%, transparent 58%),
-          linear-gradient(180deg, #080c16 0%, #090d17 100%);
+          radial-gradient(1200px 700px at -20% -25%, #2b3f84 0%, transparent 56%),
+          radial-gradient(900px 540px at 130% -10%, #20416b 0%, transparent 58%),
+          linear-gradient(180deg, #080c16 0%, #0b1020 100%);
       }
-
       .app {
         height: 100vh;
-        width: 100%;
         display: grid;
         grid-template-columns: 320px 1fr;
       }
-
       .sidebar {
         border-right: 1px solid var(--line);
         background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
@@ -55,783 +38,265 @@
         grid-template-rows: auto auto auto 1fr auto;
         min-height: 0;
       }
-
-      .sb-head {
-        padding: var(--space-3);
+      .section {
+        padding: 12px 14px;
         border-bottom: 1px solid var(--line);
       }
-
       .brand {
-        font-size: 17px;
+        font-size: 18px;
         font-weight: 650;
-        letter-spacing: .2px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
       }
-
-      .brand::before {
-        content: "◉";
-        color: var(--brand);
-        font-size: 11px;
-      }
-
-      .sb-actions,
-      .sb-owner,
-      .sb-soul,
-      .sb-wellness,
-      .sb-newchat {
-        padding: 12px var(--space-3);
-        border-bottom: 1px solid var(--line);
-      }
-
-      .sb-owner label,
-      .sb-soul label,
-      .sb-newchat label {
-        display:block;
-        font-size: 11px;
+      .newchat-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+      .history-wrap { min-height: 0; overflow: auto; padding: 10px; }
+      .history-list { display: grid; gap: 8px; }
+      .ingest-stack { display: grid; gap: 8px; }
+      .out {
+        border: 1px dashed var(--line);
+        border-radius: 10px;
+        padding: 8px;
+        white-space: pre-wrap;
+        font-size: 12px;
+        background: rgba(0,0,0,.15);
         color: var(--muted);
-        margin-bottom: 6px;
-        letter-spacing: .25px;
       }
-
-      #soulStyle {
-        min-height: 88px;
-        resize: vertical;
-      }
-
-      .soul-actions {
-        margin-top: 8px;
-        display: flex;
-        gap: 8px;
-      }
-
-      .wellness-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        margin-top: 8px;
-      }
-
-      .wellness-actions {
-        margin-top: 8px;
-        display: flex;
-        gap: 8px;
-      }
-
-      .newchat-row {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 8px;
-      }
-
-      .history-wrap {
-        min-height: 0;
-        overflow: auto;
-        padding: 10px;
-      }
-
-      .history-title {
-        font-size: 11px;
-        color: var(--muted);
-        margin: 2px 8px 8px;
-        text-transform: uppercase;
-        letter-spacing: .65px;
-      }
-
-      .history-list {
-        display: grid;
-        gap: 8px;
-      }
-
       .session-item {
         border: 1px solid var(--line);
         border-radius: 12px;
         padding: 10px;
         background: rgba(255,255,255,.02);
-        transition: border-color .2s ease, background .2s ease, transform .2s ease;
       }
-
-      .session-item:hover {
-        border-color: var(--line-strong);
-        background: rgba(255,255,255,.035);
-        transform: translateY(-1px);
-      }
-
-      .session-item-title {
-        font-size: 13px;
-        font-weight: 600;
-      }
-
-      .session-item-meta {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 4px;
-      }
-
-      .session-item-actions {
-        margin-top: 8px;
-        display: flex;
-        gap: 6px;
-      }
-
-      .sb-foot {
-        border-top: 1px solid var(--line);
-        padding: 12px;
-      }
-
-      .main {
-        min-width: 0;
-        display: grid;
-        grid-template-rows: auto 1fr;
-      }
-
+      .session-item-title { font-size: 13px; font-weight: 600; }
+      .session-item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+      .session-item-actions { margin-top: 8px; display: flex; gap: 6px; }
+      .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
       .topbar {
         border-bottom: 1px solid var(--line);
         padding: 10px 14px;
         display: flex;
-        gap: 10px;
         align-items: center;
         justify-content: space-between;
-        flex-wrap: wrap;
-        background: rgba(255,255,255,.02);
-        backdrop-filter: blur(8px);
-      }
-
-      .topbar-left,
-      .topbar-right {
-        display: flex;
         gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
       }
-
       .pill {
         font-size: 11px;
-        padding: 6px 10px;
-        border: 1px solid var(--line-strong);
+        border: 1px solid var(--line);
         border-radius: 999px;
+        padding: 6px 10px;
         color: var(--muted);
-        background: rgba(255,255,255,.03);
       }
-
-      .workspace {
-        min-height: 0;
-        display: grid;
-        grid-template-columns: 1fr;
-      }
-
-      .workspace.tool-open {
-        grid-template-columns: minmax(0, 1fr) 370px;
-      }
-
-      .chat-zone {
-        min-width: 0;
-        min-height: 0;
-        display: grid;
-        grid-template-rows: 1fr auto;
-      }
-
-      .chat-scroll {
-        min-height: 0;
-        overflow: auto;
-        padding: 18px 24px 6px;
-      }
-
-      .msg {
-        display: flex;
-        margin: 12px 0;
-        animation: fadeUp .22s ease;
-      }
-
-      .msg.user { justify-content:flex-end; }
-
+      .chat-zone { min-height: 0; display: grid; grid-template-rows: 1fr auto; }
+      .chat-scroll { min-height: 0; overflow: auto; padding: 16px 22px 8px; }
+      .msg { display: flex; margin: 10px 0; }
+      .msg.user { justify-content: flex-end; }
       .bubble {
-        max-width: min(860px, 79%);
-        padding: 12px 14px;
-        border-radius: var(--radius-md);
-        line-height: 1.42;
-        font-size: 14px;
+        max-width: min(860px, 82%);
+        border: 1px solid transparent;
+        border-radius: 14px;
+        padding: 11px 13px;
         white-space: pre-wrap;
         word-break: break-word;
-        border: 1px solid transparent;
-        box-shadow: var(--shadow-soft);
       }
-
-      .user .bubble {
-        background: linear-gradient(180deg, #5670ff 0%, #4461ff 100%);
-        color: #fff;
-        border-top-right-radius: 6px;
-      }
-
-      .assistant .bubble {
-        background: var(--panel);
-        border-color: var(--line);
-        border-top-left-radius: 6px;
-      }
-
-      .meta {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 7px;
-      }
-
+      .user .bubble { background: linear-gradient(180deg, #5a76ff, #4564ff); color: #fff; }
+      .assistant .bubble { background: var(--panel); border-color: var(--line); }
+      .meta { margin-top: 7px; font-size: 11px; color: var(--muted); }
       .composer {
         border-top: 1px solid var(--line);
-        padding: 12px 16px 14px;
+        padding: 12px 14px;
         display: grid;
         gap: 9px;
-        background: rgba(11,16,28,.94);
-        backdrop-filter: blur(8px);
+        background: rgba(10,15,26,.94);
       }
-
-      .controls {
-        display: grid;
-        grid-template-columns: 1.2fr 1fr .8fr 1.4fr 122px;
-        gap: 8px;
-      }
-
-      .toggle-row {
-        display: flex;
-        gap: 14px;
-        flex-wrap: wrap;
-        align-items: center;
-      }
-
-      .toggle-row label {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .toggle-row input[type="checkbox"] {
-        width: auto;
-      }
-
-      .actions {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .tool-panel {
-        display: none;
-        border-left: 1px solid var(--line);
-        background: linear-gradient(180deg, var(--panel-2) 0%, #121c30 100%);
-        min-height: 0;
-        overflow: auto;
-        padding: 14px;
-      }
-
-      .workspace.tool-open .tool-panel { display: block; animation: slideIn .2s ease; }
-
-      .tool-head {
-        display:flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-
-      .tool-sections { display:none; }
-      .tool-sections.active { display:block; }
-
-      .list {
-        display: grid;
-        gap: 8px;
-      }
-
-      .item {
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 10px;
-        background: rgba(255,255,255,.02);
-      }
-
-      .item-title { font-size: 13px; font-weight: 600; }
-      .item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
-      .item-preview { font-size: 12px; margin-top: 6px; white-space: pre-wrap; }
-      .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-
-      .study-view {
-        margin-top: 10px;
-        border-top: 1px dashed var(--line-strong);
-        padding-top: 10px;
-        white-space: pre-wrap;
-        font-size: 13px;
-      }
-
-      .hint { font-size: 11px; color: var(--muted); }
-      .spinner { display:none; }
-      .spinner.on { display:inline; }
-
+      .controls { display: grid; grid-template-columns: 1fr 1fr .7fr 1.2fr 120px; gap: 8px; }
+      .toggle-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      .toggle-row label { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+      .toggle-row input { width: auto; }
       input, select, textarea, button {
         font: inherit;
       }
-
       input, select, textarea {
         width: 100%;
-        border: 1px solid var(--line-strong);
-        border-radius: var(--radius-sm);
-        background: rgba(255,255,255,.03);
         color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255,255,255,.04);
         padding: 9px 10px;
-        transition: border-color .2s ease, background .2s ease;
       }
-
-      input:focus, select:focus, textarea:focus {
-        outline: none;
-        border-color: rgba(74,102,255,.7);
-        background: rgba(255,255,255,.05);
-      }
-
-      textarea { min-height: 62px; resize: vertical; }
-
+      textarea { min-height: 64px; resize: vertical; }
       button {
-        border: 1px solid var(--line-strong);
-        border-radius: var(--radius-sm);
-        background: rgba(255,255,255,.05);
         color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255,255,255,.05);
         padding: 9px 10px;
         cursor: pointer;
-        transition: transform .15s ease, border-color .2s ease, background .2s ease;
       }
-
-      button:hover {
-        transform: translateY(-1px);
-        border-color: rgba(255,255,255,.32);
-        background: rgba(255,255,255,.08);
-      }
-
-      button.primary {
-        background: linear-gradient(180deg, #5a74ff 0%, #4a66ff 100%);
-        border-color: var(--brand);
-        color: #fff;
-      }
-
-      button.primary:hover {
-        border-color: #6e85ff;
-      }
-
-      button.danger {
-        background: rgba(210,87,87,.18);
-        border-color: rgba(210,87,87,.35);
-      }
-
-      .icon {
-        font-size: 12px;
-        margin-right: 5px;
-        opacity: .9;
-      }
-
-      @keyframes fadeUp {
-        from { opacity: 0; transform: translateY(4px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-
-      @keyframes slideIn {
-        from { opacity: 0; transform: translateX(10px); }
-        to { opacity: 1; transform: translateX(0); }
-      }
-
-      @media (max-width: 1120px) {
-        .workspace.tool-open { grid-template-columns: 1fr; }
-        .tool-panel { border-left: 0; border-top: 1px solid var(--line); }
-      }
-
+      button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
+      button.danger { background: rgba(200, 91, 91, .2); border-color: rgba(200, 91, 91, .4); }
+      .hint { font-size: 11px; color: var(--muted); }
       @media (max-width: 900px) {
         .app { grid-template-columns: 1fr; }
-        .sidebar { grid-template-rows: auto auto auto; }
-        .history-wrap, .sb-foot { max-height: 220px; }
         .controls { grid-template-columns: 1fr 1fr; }
-        .bubble { max-width: 92%; }
       }
     </style>
   </head>
   <body data-csrf="{{ csrf_token }}">
     <div class="app">
       <aside class="sidebar">
-        <div class="sb-head">
-          <div class="brand">OpenSift</div>
+        <div class="section"><div class="brand">OpenSift Chat</div></div>
+
+        <div class="section" style="display:flex; gap:8px;">
+          <button id="refreshHistoryBtn" type="button" style="width:100%;">Refresh</button>
+          <button id="settingsBtn" type="button" style="width:100%;">Settings</button>
         </div>
 
-        <div class="sb-actions" style="display:flex; gap:8px;">
-          <button id="refreshHistoryBtn" type="button" style="width:100%;"><span class="icon">↻</span>Refresh</button>
-        </div>
-
-        <div class="sb-newchat">
-          <label for="newChatName">New Chat Name (optional)</label>
+        <div class="section">
+          <label for="newChatName" class="hint">New Chat Name (optional)</label>
           <div class="newchat-row">
             <input id="newChatName" placeholder="bio302-midterm" />
-            <button id="newChatBtn" type="button" class="primary"><span class="icon">＋</span>New</button>
+            <button id="newChatBtn" type="button" class="primary">New</button>
           </div>
-          <div class="hint" style="margin-top:6px;">Leave blank for auto-name.</div>
         </div>
 
-        <div class="sb-owner">
-          <label for="owner">Current Owner</label>
+        <div class="section">
+          <label for="owner" class="hint">Current Owner</label>
           <input id="owner" value="{{ owner }}" placeholder="bio101" />
         </div>
 
-        <div class="sb-soul">
-          <label for="soulStyle">Global Study Style (SOUL)</label>
-          <textarea id="soulStyle" placeholder="Example: teach me with analogies, short bullets, and practice questions."></textarea>
-          <div class="soul-actions">
-            <button id="saveSoulBtn" type="button"><span class="icon">★</span>Save Style</button>
-            <button id="clearSoulBtn" type="button" class="danger"><span class="icon">✕</span>Clear</button>
+        <div class="section">
+          <div class="hint" style="margin-bottom:6px;">Ingest Material</div>
+          <div class="ingest-stack">
+            <input id="ingestTitle" placeholder="Source title (optional)" />
+            <input id="ingestUrl" placeholder="https://example.com/article" />
+            <button id="ingestUrlBtn" type="button">Ingest URL</button>
+            <input id="ingestFile" type="file" />
+            <button id="ingestFileBtn" type="button">Upload + Ingest</button>
+            <div class="out" id="ingestOut">No ingest action yet.</div>
           </div>
-          <div class="hint" id="soulHint" style="margin-top:6px;">Saved globally in SOUL.md (applies everywhere)</div>
-        </div>
-
-        <div class="sb-wellness">
-          <label for="wellnessEnabled">Wellness Reminders</label>
-          <label class="hint" style="display:flex; align-items:center; gap:8px;">
-            <input id="wellnessEnabled" type="checkbox" />
-            Enable break reminders
-          </label>
-          <div class="wellness-grid">
-            <input id="wellnessEveryMsgs" type="number" min="1" placeholder="Every N user msgs" />
-            <input id="wellnessMinMinutes" type="number" min="1" placeholder="Min minutes gap" />
-          </div>
-          <div class="wellness-actions">
-            <button id="saveWellnessBtn" type="button"><span class="icon">★</span>Save Wellness</button>
-          </div>
-          <div class="hint" id="wellnessHint" style="margin-top:6px;">Applies globally to UI and terminal chat.</div>
         </div>
 
         <div class="history-wrap">
-          <div class="history-title">Chats</div>
+          <div class="hint" style="margin:2px 4px 8px;">Conversation History</div>
           <div class="history-list" id="historyList"></div>
         </div>
 
-        <div class="sb-foot">
-          <button id="logoutBtn" type="button" style="width:100%;"><span class="icon">⇦</span>Logout</button>
+        <div class="section" style="display:flex; gap:8px; border-top:1px solid var(--line);">
+          <button id="clearBtn" type="button" class="danger" style="width:100%;">Clear</button>
+          <button id="logoutBtn" type="button" style="width:100%;">Logout</button>
         </div>
       </aside>
 
       <main class="main">
         <div class="topbar">
-          <div class="topbar-left">
-            <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
-            <span class="pill spinner" id="busy">Working…</span>
-            <button id="showIngestBtn" type="button"><span class="icon">⤓</span>Ingest</button>
-            <button id="showLibraryBtn" type="button"><span class="icon">☰</span>Library</button>
-            <button id="showQuizBtn" type="button"><span class="icon">✓</span>Quiz</button>
-            <button id="showFlashcardsBtn" type="button"><span class="icon">▣</span>Flashcards</button>
-          </div>
-          <div class="topbar-right">
-            <button id="saveStudyBtn" type="button"><span class="icon">★</span>Save Last</button>
-            <button id="clearBtn" type="button" class="danger"><span class="icon">✕</span>Clear</button>
-          </div>
+          <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
+          <span class="pill" id="busy" style="display:none;">Working...</span>
         </div>
 
-        <div class="workspace" id="workspace">
-          <div class="chat-zone">
-            <div class="chat-scroll" id="chat">
-              {% for m in history %}
-                <div class="msg {{ m.role }}">
-                  <div class="bubble">
-                    {{ m.text }}
-                    <div class="meta">{{ m.ts }}</div>
-                  </div>
+        <div class="chat-zone">
+          <div class="chat-scroll" id="chat">
+            {% for m in history %}
+              <div class="msg {{ m.role }}">
+                <div class="bubble">
+                  {{ m.text }}
+                  <div class="meta">{{ m.ts }}</div>
                 </div>
-              {% endfor %}
-            </div>
-
-            <div class="composer">
-              <div class="controls">
-                <select id="mode">
-                  <option value="study_guide">Study Guide</option>
-                  <option value="key_points">Key Points</option>
-                  <option value="quiz">Quiz</option>
-                </select>
-                <select id="provider">
-                  <option value="claude_code">Claude Code</option>
-                  <option value="codex">ChatGPT Codex</option>
-                  <option value="claude">Claude API</option>
-                  <option value="openai">OpenAI</option>
-                </select>
-                <input id="k" type="number" value="8" min="1" max="20" />
-                <select id="model">
-                  <option value="" selected>Auto model</option>
-                  {% for m in supported_claude_models %}
-                    <option value="{{ m }}">{{ m }}</option>
-                  {% endfor %}
-                  <option value="gpt-5.2">gpt-5.2</option>
-                </select>
-                <button class="primary" id="sendBtn" type="button"><span class="icon">➤</span>Send</button>
               </div>
-
-              <div class="toggle-row">
-                <label><input id="thinkingEnabled" type="checkbox" /> Enable Claude thinking</label>
-                <label><input id="showThinking" type="checkbox" checked /> Show thinking/status</label>
-                <label><input id="trueStreaming" type="checkbox" checked /> True streaming</label>
-              </div>
-
-              <textarea id="msg" placeholder="Ask OpenSift... (Shift+Enter newline)"></textarea>
-
-              <div class="actions">
-                <div class="hint">Enter sends. Shift+Enter for newline.</div>
-              </div>
-            </div>
+            {% endfor %}
           </div>
 
-          <aside class="tool-panel" id="toolPanel">
-            <div class="tool-head">
-              <strong id="toolTitle">Tool</strong>
-              <button id="closeToolBtn" type="button"><span class="icon">←</span>Close</button>
+          <div class="composer">
+            <div class="controls">
+              <select id="mode">
+                <option value="study_guide">Study Guide</option>
+                <option value="key_points">Key Points</option>
+                <option value="quiz">Quiz</option>
+              </select>
+              <select id="provider">
+                <option value="claude_code" {% if preferred_provider == "claude_code" %}selected{% endif %} {% if not provider_caps.claude_code_ready %}disabled{% endif %}>
+                  Claude Code{% if not provider_caps.claude_code_cli_available and provider_caps.anthropic_api_key_set %} (Claude API fallback){% elif not provider_caps.claude_code_ready %} (unavailable in container){% endif %}
+                </option>
+                <option value="codex" {% if preferred_provider == "codex" %}selected{% endif %} {% if not provider_caps.codex_ready %}disabled{% endif %}>
+                  ChatGPT Codex{% if not provider_caps.codex_cli_available and provider_caps.openai_api_key_set %} (OpenAI fallback){% elif not provider_caps.codex_ready %} (unavailable in container){% endif %}
+                </option>
+                <option value="claude" {% if preferred_provider == "claude" %}selected{% endif %} {% if not provider_caps.claude_ready %}disabled{% endif %}>
+                  Claude API{% if not provider_caps.claude_ready %} (key required){% endif %}
+                </option>
+                <option value="openai" {% if preferred_provider == "openai" %}selected{% endif %} {% if not provider_caps.openai_ready %}disabled{% endif %}>
+                  OpenAI{% if not provider_caps.openai_ready %} (key required){% endif %}
+                </option>
+              </select>
+              <input id="k" type="number" value="8" min="1" max="20" />
+              <select id="model">
+                <option value="" selected>Auto model</option>
+                {% for m in supported_claude_models %}
+                  <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+                {% for m in supported_openai_models %}
+                  <option value="{{ m }}">{{ m }}</option>
+                {% endfor %}
+              </select>
+              <button id="sendBtn" type="button" class="primary">Send</button>
             </div>
 
-            <section id="toolIngest" class="tool-sections">
-              <div class="hint" style="margin-bottom:8px;">Ingest into current owner.</div>
-              <input id="ingestTitle" placeholder="Source title (optional)" />
-              <input id="ingestUrl" placeholder="https://..." style="margin-top:8px;" />
-              <button id="ingestUrlBtn" type="button" style="margin-top:8px;"><span class="icon">⤓</span>Ingest URL</button>
-              <input id="ingestFile" type="file" style="margin-top:12px;" />
-              <button id="ingestFileBtn" type="button" style="margin-top:8px;"><span class="icon">⬆</span>Upload & Ingest</button>
-            </section>
-
-            <section id="toolLibrary" class="tool-sections">
-              <div class="hint" style="margin-bottom:8px;">Saved study outputs.</div>
-              <div class="list" id="libraryList"></div>
-              <div class="study-view" id="studyView" style="display:none;"></div>
-            </section>
-
-            <section id="toolQuiz" class="tool-sections">
-              <input id="quizTitle" placeholder="Attempt title" />
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                <input id="quizScore" type="number" min="0" placeholder="Score" />
-                <input id="quizTotal" type="number" min="1" placeholder="Total" />
-              </div>
-              <textarea id="quizNotes" placeholder="Notes" style="margin-top:8px;"></textarea>
-              <button id="saveQuizAttemptBtn" type="button" style="margin-top:8px;"><span class="icon">✓</span>Save Attempt</button>
-              <div class="hint" id="quizStats" style="margin:10px 0 8px;">No attempts yet.</div>
-              <div class="list" id="quizList"></div>
-            </section>
-
-            <section id="toolFlashcards" class="tool-sections">
-              <input id="fcFront" placeholder="Front" />
-              <textarea id="fcBack" placeholder="Back" style="margin-top:8px;"></textarea>
-              <input id="fcTags" placeholder="Tags (optional)" style="margin-top:8px;" />
-              <button id="addFlashcardBtn" type="button" style="margin-top:8px;"><span class="icon">＋</span>Add Flashcard</button>
-              <label class="hint" style="display:block; margin-top:10px;">
-                <input id="fcDueOnly" type="checkbox" checked /> Show due cards only
+            <div class="toggle-row">
+              <label><input id="thinkingEnabled" type="checkbox" /> Enable thinking</label>
+              <label>Thinking level
+                <select id="thinkingLevel" style="width:auto; min-width:130px;">
+                  {% for lvl in supported_thinking_levels %}
+                    <option value="{{ lvl }}" {% if lvl == "medium" %}selected{% endif %}>{{ lvl }}</option>
+                  {% endfor %}
+                </select>
               </label>
-              <button id="refreshFlashcardsBtn" type="button" style="margin-top:8px;"><span class="icon">↻</span>Refresh Cards</button>
-              <div class="list" id="flashcardList" style="margin-top:10px;"></div>
-            </section>
-          </aside>
+              <label><input id="showThinking" type="checkbox" checked /> Show thinking/status</label>
+              <label><input id="trueStreaming" type="checkbox" checked /> True streaming</label>
+            </div>
+
+            <textarea id="msg" placeholder="Ask OpenSift... (Shift+Enter newline)"></textarea>
+            {% if not provider_caps.any_provider_ready %}
+            <div class="hint">
+              No LLM provider is ready in this container. Install `claude`/`codex` inside the image, or set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in `/app/.env`.
+            </div>
+            {% endif %}
+            <div class="hint">Enter sends. Shift+Enter for newline.</div>
+          </div>
         </div>
       </main>
     </div>
 
     <script>
-      const workspace = document.getElementById("workspace");
-      const toolTitle = document.getElementById("toolTitle");
-      const closeToolBtn = document.getElementById("closeToolBtn");
-
       const chat = document.getElementById("chat");
       const ownerEl = document.getElementById("owner");
       const ownerLabel = document.getElementById("ownerLabel");
-      const soulStyleEl = document.getElementById("soulStyle");
-      const saveSoulBtn = document.getElementById("saveSoulBtn");
-      const clearSoulBtn = document.getElementById("clearSoulBtn");
-      const soulHintEl = document.getElementById("soulHint");
-      const wellnessEnabledEl = document.getElementById("wellnessEnabled");
-      const wellnessEveryMsgsEl = document.getElementById("wellnessEveryMsgs");
-      const wellnessMinMinutesEl = document.getElementById("wellnessMinMinutes");
-      const saveWellnessBtn = document.getElementById("saveWellnessBtn");
-      const wellnessHintEl = document.getElementById("wellnessHint");
       const msgEl = document.getElementById("msg");
       const modeEl = document.getElementById("mode");
       const providerEl = document.getElementById("provider");
       const kEl = document.getElementById("k");
       const modelEl = document.getElementById("model");
       const thinkingEnabledEl = document.getElementById("thinkingEnabled");
+      const thinkingLevelEl = document.getElementById("thinkingLevel");
       const showThinkingEl = document.getElementById("showThinking");
       const trueStreamingEl = document.getElementById("trueStreaming");
+
       const sendBtn = document.getElementById("sendBtn");
       const clearBtn = document.getElementById("clearBtn");
       const logoutBtn = document.getElementById("logoutBtn");
-      const saveStudyBtn = document.getElementById("saveStudyBtn");
+      const settingsBtn = document.getElementById("settingsBtn");
       const newChatBtn = document.getElementById("newChatBtn");
       const newChatNameEl = document.getElementById("newChatName");
       const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
-
-      const showIngestBtn = document.getElementById("showIngestBtn");
-      const showLibraryBtn = document.getElementById("showLibraryBtn");
-      const showQuizBtn = document.getElementById("showQuizBtn");
-      const showFlashcardsBtn = document.getElementById("showFlashcardsBtn");
-
+      const historyList = document.getElementById("historyList");
       const ingestTitleEl = document.getElementById("ingestTitle");
       const ingestUrlEl = document.getElementById("ingestUrl");
       const ingestUrlBtn = document.getElementById("ingestUrlBtn");
       const ingestFileEl = document.getElementById("ingestFile");
       const ingestFileBtn = document.getElementById("ingestFileBtn");
-
-      const historyList = document.getElementById("historyList");
-      const libraryList = document.getElementById("libraryList");
-      const studyView = document.getElementById("studyView");
-
-      const quizTitleEl = document.getElementById("quizTitle");
-      const quizScoreEl = document.getElementById("quizScore");
-      const quizTotalEl = document.getElementById("quizTotal");
-      const quizNotesEl = document.getElementById("quizNotes");
-      const quizList = document.getElementById("quizList");
-      const quizStats = document.getElementById("quizStats");
-      const saveQuizAttemptBtn = document.getElementById("saveQuizAttemptBtn");
-
-      const fcFrontEl = document.getElementById("fcFront");
-      const fcBackEl = document.getElementById("fcBack");
-      const fcTagsEl = document.getElementById("fcTags");
-      const fcDueOnlyEl = document.getElementById("fcDueOnly");
-      const addFlashcardBtn = document.getElementById("addFlashcardBtn");
-      const refreshFlashcardsBtn = document.getElementById("refreshFlashcardsBtn");
-      const flashcardList = document.getElementById("flashcardList");
-
+      const ingestOutEl = document.getElementById("ingestOut");
       const busy = document.getElementById("busy");
       const csrfToken = document.body.dataset.csrf || "";
 
-      function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
-      function setBusy(on) { busy.classList.toggle("on", !!on); }
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
         headers.set("X-CSRF-Token", csrfToken);
         return fetch(url, { ...options, headers });
-      }
-
-      function owner() {
-        const raw = ownerEl.value.trim() || "default";
-        const normalized = raw.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 128) || "default";
-        if (ownerEl.value !== normalized) ownerEl.value = normalized;
-        ownerLabel.textContent = normalized;
-        return normalized;
-      }
-
-      async function loadSoulStyle() {
-        const res = await fetch("/chat/soul");
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-        const data = await res.json();
-        soulStyleEl.value = data.style || "";
-        soulHintEl.textContent = soulStyleEl.value.trim()
-          ? "Global style active (all chats/owners)."
-          : "No global style set.";
-      }
-
-      async function saveSoulStyle() {
-        const form = new FormData();
-        form.append("style", (soulStyleEl.value || "").trim());
-        const res = await csrfFetch("/chat/soul/set", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-        const data = await res.json();
-        soulStyleEl.value = data.style || "";
-        soulHintEl.textContent = soulStyleEl.value.trim()
-          ? "Custom style saved."
-          : "Style cleared. Default style will be used.";
-      }
-
-      async function clearSoulStyle() {
-        soulStyleEl.value = "";
-        await saveSoulStyle();
-      }
-
-      async function loadWellnessSettings() {
-        const res = await fetch("/chat/wellness");
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-        const data = await res.json();
-        const s = data.settings || {};
-        wellnessEnabledEl.checked = !!s.enabled;
-        wellnessEveryMsgsEl.value = Number(s.every_user_msgs || 6);
-        wellnessMinMinutesEl.value = Number(s.min_minutes || 45);
-        wellnessHintEl.textContent = s.enabled
-          ? `Enabled: every ${wellnessEveryMsgsEl.value} user msgs, at least ${wellnessMinMinutesEl.value} min apart.`
-          : "Disabled.";
-      }
-
-      async function saveWellnessSettings() {
-        const every = Math.max(1, parseInt(wellnessEveryMsgsEl.value || "6", 10) || 6);
-        const mins = Math.max(1, parseInt(wellnessMinMinutesEl.value || "45", 10) || 45);
-        wellnessEveryMsgsEl.value = String(every);
-        wellnessMinMinutesEl.value = String(mins);
-
-        const form = new FormData();
-        form.append("enabled", wellnessEnabledEl.checked ? "true" : "false");
-        form.append("every_user_msgs", String(every));
-        form.append("min_minutes", String(mins));
-
-        const res = await csrfFetch("/chat/wellness/set", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-        const data = await res.json();
-        const s = data.settings || {};
-        wellnessEnabledEl.checked = !!s.enabled;
-        wellnessEveryMsgsEl.value = Number(s.every_user_msgs || every);
-        wellnessMinMinutesEl.value = Number(s.min_minutes || mins);
-        wellnessHintEl.textContent = s.enabled
-          ? `Saved: every ${wellnessEveryMsgsEl.value} user msgs, at least ${wellnessMinMinutesEl.value} min apart.`
-          : "Saved: wellness reminders disabled.";
-      }
-
-      function autoOwnerName() {
-        const d = new Date();
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        const hh = String(d.getHours()).padStart(2, "0");
-        const mm = String(d.getMinutes()).padStart(2, "0");
-        return `chat-${y}${m}${day}-${hh}${mm}`;
-      }
-
-      function addBubble(role, text, ts) {
-        const msg = document.createElement("div");
-        msg.className = "msg " + role;
-
-        const bubble = document.createElement("div");
-        bubble.className = "bubble";
-
-        const textNode = document.createElement("div");
-        textNode.className = "text";
-        textNode.textContent = text;
-        bubble.appendChild(textNode);
-
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = ts || "";
-        bubble.appendChild(meta);
-
-        msg.appendChild(bubble);
-        chat.appendChild(msg);
-        scrollToBottom();
-        return { textEl: textNode, bubbleEl: bubble };
-      }
-
-      function setIconButtonLabel(btn, icon, label) {
-        btn.textContent = "";
-        const iconEl = document.createElement("span");
-        iconEl.className = "icon";
-        iconEl.textContent = icon;
-        btn.appendChild(iconEl);
-        btn.appendChild(document.createTextNode(label));
-      }
-
-      function appendTextBlock(parent, className, text) {
-        const el = document.createElement("div");
-        el.className = className;
-        el.textContent = text || "";
-        parent.appendChild(el);
-        return el;
-      }
-
-      function renderHistory(messages) {
-        chat.innerHTML = "";
-        for (const m of messages || []) {
-          addBubble(m.role || "assistant", m.text || "", m.ts || "");
-        }
       }
 
       async function ensureAuth(res) {
@@ -842,19 +307,61 @@
         return true;
       }
 
-      function openTool(toolId, title) {
-        workspace.classList.add("tool-open");
-        toolTitle.textContent = title;
-        for (const el of document.querySelectorAll(".tool-sections")) {
-          el.classList.toggle("active", el.id === toolId);
-        }
-        if (toolId === "toolLibrary") loadStudyLibrary();
-        if (toolId === "toolQuiz") loadQuizHistory();
-        if (toolId === "toolFlashcards") loadFlashcards();
+      function setBusy(on) { busy.style.display = on ? "inline" : "none"; }
+      function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
+
+      function owner() {
+        const raw = ownerEl.value.trim() || "default";
+        const normalized = raw.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 128) || "default";
+        ownerEl.value = normalized;
+        ownerLabel.textContent = normalized;
+        return normalized;
       }
 
-      function closeTool() {
-        workspace.classList.remove("tool-open");
+      function addBubble(role, text, ts) {
+        const row = document.createElement("div");
+        row.className = "msg " + role;
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        const textNode = document.createElement("div");
+        textNode.textContent = text || "";
+        bubble.appendChild(textNode);
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = ts || "";
+        bubble.appendChild(meta);
+        row.appendChild(bubble);
+        chat.appendChild(row);
+        scrollToBottom();
+        return { textEl: textNode, bubbleEl: bubble };
+      }
+
+      function normalizeProviderAndModel(provider, model) {
+        const p = (provider || "").trim().toLowerCase();
+        const m = (model || "").trim();
+        if (!m) return { provider: p, model: m, note: "" };
+        const isClaudeModel = m.startsWith("claude-");
+        const isGptModel = m.startsWith("gpt-");
+        if ((p === "codex" || p === "openai") && isClaudeModel) {
+          return {
+            provider: p,
+            model: "",
+            note: `Model '${m}' is Claude-family and not valid for ${p}; using Auto model instead.`,
+          };
+        }
+        if ((p === "claude" || p === "claude_code") && isGptModel) {
+          return {
+            provider: p,
+            model: "",
+            note: `Model '${m}' is GPT-family and not valid for ${p}; using Auto model instead.`,
+          };
+        }
+        return { provider: p, model: m, note: "" };
+      }
+
+      function renderHistory(messages) {
+        chat.innerHTML = "";
+        for (const m of messages || []) addBubble(m.role || "assistant", m.text || "", m.ts || "");
       }
 
       async function sendStream() {
@@ -868,123 +375,124 @@
         setBusy(true);
 
         const a = addBubble("assistant", "", new Date().toISOString());
+        const statusEl = document.createElement("div");
+        statusEl.className = "hint";
+        statusEl.style.marginBottom = "6px";
+        a.bubbleEl.insertBefore(statusEl, a.textEl);
+        const statusLogEl = document.createElement("div");
+        statusLogEl.className = "hint";
+        statusLogEl.style.whiteSpace = "pre-wrap";
+        statusLogEl.style.fontSize = "12px";
+        statusLogEl.style.opacity = "0.9";
+        statusLogEl.style.marginBottom = "6px";
+        a.bubbleEl.insertBefore(statusLogEl, a.textEl);
+        const statusLines = [];
+        const pushStatus = (text) => {
+          const line = (text || "").trim();
+          if (!line) return;
+          const stamped = `[${new Date().toLocaleTimeString()}] ${line}`;
+          statusLines.push(stamped);
+          if (statusLines.length > 10) statusLines.shift();
+          statusLogEl.textContent = statusLines.join("\n");
+        };
 
         const form = new FormData();
         form.append("owner", o);
         form.append("message", message);
         form.append("mode", modeEl.value);
-        form.append("provider", providerEl.value);
+        const normalized = normalizeProviderAndModel(providerEl.value, modelEl.value);
+        form.append("provider", normalized.provider || providerEl.value);
         form.append("k", kEl.value);
-        form.append("model", modelEl.value);
+        form.append("model", normalized.model);
         form.append("thinking_enabled", thinkingEnabledEl.checked ? "true" : "false");
+        form.append("thinking_level", thinkingLevelEl.value || "medium");
         form.append("show_thinking", showThinkingEl.checked ? "true" : "false");
         form.append("true_streaming", trueStreamingEl.checked ? "true" : "false");
-
-        const res = await csrfFetch("/chat/stream", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-
-        if (!res.ok || !res.body) {
-          a.textEl.textContent = "Streaming failed to start.";
-          setBusy(false);
-          sendBtn.disabled = false;
-          return;
+        if (normalized.note) {
+          statusEl.textContent = normalized.note;
+          pushStatus(normalized.note);
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-        const statusEl = document.createElement("div");
-        statusEl.className = "hint";
-        statusEl.style.marginBottom = "6px";
-        statusEl.textContent = "";
-        a.bubbleEl.insertBefore(statusEl, a.textEl);
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          let idx;
-          while ((idx = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, idx).trim();
-            buffer = buffer.slice(idx + 1);
-            if (!line) continue;
-
-            let evt;
-            try { evt = JSON.parse(line); } catch { continue; }
-            if (evt.type === "delta") {
-              a.textEl.textContent += (evt.text || "");
-              scrollToBottom();
-            } else if (evt.type === "status") {
-              if (showThinkingEl.checked) {
-                statusEl.textContent = evt.text || "";
-                scrollToBottom();
-              }
-            } else if (evt.type === "done") {
-              statusEl.textContent = "";
-            }
-          }
-        }
-
-        setBusy(false);
-        sendBtn.disabled = false;
-        await loadSessions();
-      }
-
-      async function ingestUrl() {
-        const o = owner();
-        const url = ingestUrlEl.value.trim();
-        if (!url) return;
-
-        addBubble("user", `Ingest URL: ${url}`, new Date().toISOString());
-        ingestUrlBtn.disabled = true;
+        const controller = new AbortController();
+        const timeoutMs = 600000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
-          const form = new FormData();
-          form.append("owner", o);
-          form.append("url", url);
-          form.append("source_title", ingestTitleEl.value.trim());
-
-          const res = await csrfFetch("/chat/ingest/url", { method: "POST", body: form });
+          const res = await csrfFetch("/chat/stream", { method: "POST", body: form, signal: controller.signal });
           if (!(await ensureAuth(res))) return;
-
-          let data = null;
-          try { data = await res.json(); } catch { data = null; }
-          const msg = data?.assistant?.text || `URL ingest failed (HTTP ${res.status}).`;
-          addBubble("assistant", msg, new Date().toISOString());
-
-          if (res.ok) {
-            ingestTitleEl.value = "";
-            ingestUrlEl.value = "";
-            await loadSessions();
+          if (!res.ok || !res.body) {
+            a.textEl.textContent = "Streaming failed to start.";
+            return;
           }
-        } catch (e) {
-          addBubble("assistant", `URL ingest failed: ${e}`, new Date().toISOString());
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let buffer = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let idx;
+            while ((idx = buffer.indexOf("\n")) >= 0) {
+              const line = buffer.slice(0, idx).trim();
+              buffer = buffer.slice(idx + 1);
+              if (!line) continue;
+              let evt;
+              try { evt = JSON.parse(line); } catch { continue; }
+              if (evt.type === "delta") a.textEl.textContent += (evt.text || "");
+              if (evt.type === "status" && showThinkingEl.checked) {
+                statusEl.textContent = evt.text || "";
+                pushStatus(evt.text || "");
+              }
+              if (evt.type === "error") {
+                const msg = evt.message || "Request failed.";
+                a.textEl.textContent += (a.textEl.textContent ? "\n\n" : "") + `⚠️ ${msg}`;
+                pushStatus(`Error: ${msg}`);
+              }
+              if (evt.type === "done") statusEl.textContent = "Completed.";
+              scrollToBottom();
+            }
+          }
+        } catch (err) {
+          let recovered = false;
+          try {
+            const exp = await fetch(`/chat/session/export?owner=${encodeURIComponent(o)}`);
+            if (exp.ok) {
+              const data = await exp.json();
+              const hist = data.history || [];
+              for (let i = hist.length - 1; i >= 0; i--) {
+                const m = hist[i];
+                if (m && m.role === "assistant" && (m.text || "").trim()) {
+                  a.textEl.textContent = m.text || "";
+                  recovered = true;
+                  break;
+                }
+              }
+            }
+          } catch (_) {}
+          if (recovered) {
+            statusEl.textContent = "Recovered from session cache.";
+            pushStatus("Recovered from session cache.");
+            return;
+          }
+          if (controller.signal.aborted) {
+            const t = "⚠️ Request timed out while loading/retrieving. Please retry.";
+            a.textEl.textContent += (a.textEl.textContent ? "\n\n" : "") + t;
+            pushStatus(t);
+          } else {
+            const t = "⚠️ Streaming interrupted. If this happened during first-run embedding download, retry once warmup completes.";
+            a.textEl.textContent += (a.textEl.textContent ? "\n\n" : "") + t;
+            pushStatus(t);
+          }
+          statusEl.textContent = "Failed.";
         } finally {
-          ingestUrlBtn.disabled = false;
+          clearTimeout(timeoutId);
+          sendBtn.disabled = false;
+          setBusy(false);
+          await loadSessions();
         }
-      }
-
-      async function ingestFile() {
-        const o = owner();
-        const file = ingestFileEl.files && ingestFileEl.files[0];
-        if (!file) return;
-
-        addBubble("user", `Upload & ingest: ${file.name}`, new Date().toISOString());
-        ingestFileBtn.disabled = true;
-
-        const form = new FormData();
-        form.append("owner", o);
-        form.append("file", file);
-
-        const res = await csrfFetch("/chat/ingest/file", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-
-        const data = await res.json();
-        addBubble("assistant", data?.assistant?.text || "File ingest failed.", new Date().toISOString());
-
-        ingestFileEl.value = "";
-        ingestFileBtn.disabled = false;
       }
 
       async function clearChat() {
@@ -1005,7 +513,6 @@
         const res = await fetch("/chat/session/list");
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
-
         const data = await res.json();
         const sessions = data.sessions || [];
 
@@ -1021,21 +528,29 @@
         for (const s of sessions) {
           const card = document.createElement("div");
           card.className = "session-item";
-          appendTextBlock(card, "session-item-title", s.owner || "");
-          appendTextBlock(card, "session-item-meta", `${s.count || 0} msgs · ${s.last_ts || ""}`);
+
+          const t = document.createElement("div");
+          t.className = "session-item-title";
+          t.textContent = s.owner || "";
+          card.appendChild(t);
+
+          const m = document.createElement("div");
+          m.className = "session-item-meta";
+          m.textContent = `${s.count || 0} msgs · ${s.last_ts || ""}`;
+          card.appendChild(m);
 
           const actions = document.createElement("div");
           actions.className = "session-item-actions";
 
           const openBtn = document.createElement("button");
           openBtn.type = "button";
-          setIconButtonLabel(openBtn, "↗", "Open");
+          openBtn.textContent = "Open";
           openBtn.addEventListener("click", () => openSession(s.owner));
 
           const delBtn = document.createElement("button");
           delBtn.type = "button";
           delBtn.className = "danger";
-          setIconButtonLabel(delBtn, "✕", "Delete");
+          delBtn.textContent = "Delete";
           delBtn.addEventListener("click", () => deleteSessionByOwner(s.owner));
 
           actions.appendChild(openBtn);
@@ -1048,7 +563,6 @@
       async function openSession(ownerName) {
         ownerEl.value = ownerName;
         owner();
-        await loadSoulStyle();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(ownerName)}`);
         if (!(await ensureAuth(res))) return;
         if (!res.ok) return;
@@ -1061,16 +575,15 @@
         form.append("owner", ownerName);
         const res = await csrfFetch("/chat/session/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
-
-        if (owner() === ownerName) {
-          chat.innerHTML = "";
-        }
+        if (owner() === ownerName) chat.innerHTML = "";
         await loadSessions();
       }
 
       async function startNewChat() {
         const typed = (newChatNameEl.value || "").trim();
-        const nextOwner = typed || autoOwnerName();
+        const d = new Date();
+        const fallback = `chat-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}`;
+        const nextOwner = typed || fallback;
 
         const form = new FormData();
         form.append("owner", nextOwner);
@@ -1080,320 +593,62 @@
         newChatNameEl.value = "";
         ownerEl.value = nextOwner;
         owner();
-        await loadSoulStyle();
         chat.innerHTML = "";
         await loadSessions();
       }
 
-      async function loadStudyLibrary() {
-        const o = owner();
-        const res = await fetch(`/chat/study/list?owner=${encodeURIComponent(o)}`);
+      async function ingestUrl() {
+        const url = (ingestUrlEl.value || "").trim();
+        if (!url) return;
+        ingestOutEl.textContent = "Ingesting URL...";
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("url", url);
+        form.append("source_title", (ingestTitleEl.value || "").trim());
+        const res = await csrfFetch("/chat/ingest/url", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-
         const data = await res.json();
-        const items = data.items || [];
-        libraryList.innerHTML = "";
-
-        if (!items.length) {
-          const hint = document.createElement("div");
-          hint.className = "hint";
-          hint.textContent = `No saved items for ${o}.`;
-          libraryList.appendChild(hint);
-          return;
-        }
-
-        for (const item of items) {
-          const card = document.createElement("div");
-          card.className = "item";
-          appendTextBlock(card, "item-title", item.title || "Saved Study Item");
-          appendTextBlock(card, "item-meta", `${item.mode || "study"} · ${item.created_at || ""}`);
-          appendTextBlock(card, "item-preview", item.preview || "");
-
-          const actions = document.createElement("div");
-          actions.className = "item-actions";
-
-          const openBtn = document.createElement("button");
-          openBtn.type = "button";
-          setIconButtonLabel(openBtn, "↗", "Open");
-          openBtn.addEventListener("click", () => openStudyItem(item.id));
-
-          const delBtn = document.createElement("button");
-          delBtn.type = "button";
-          delBtn.className = "danger";
-          setIconButtonLabel(delBtn, "✕", "Delete");
-          delBtn.addEventListener("click", () => deleteStudyItem(item.id));
-
-          actions.appendChild(openBtn);
-          actions.appendChild(delBtn);
-          card.appendChild(actions);
-          libraryList.appendChild(card);
-        }
+        ingestOutEl.textContent = data?.assistant?.text || `Ingest failed (HTTP ${res.status}).`;
       }
 
-      async function openStudyItem(itemId) {
-        const o = owner();
-        const res = await fetch(`/chat/study/get?owner=${encodeURIComponent(o)}&item_id=${encodeURIComponent(itemId)}`);
+      async function ingestFile() {
+        const file = ingestFileEl.files && ingestFileEl.files[0];
+        if (!file) return;
+        ingestOutEl.textContent = "Uploading + ingesting file...";
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("file", file);
+        const res = await csrfFetch("/chat/ingest/file", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-
         const data = await res.json();
-        const item = data.item;
-        if (!item) return;
-
-        studyView.style.display = "block";
-        studyView.textContent = `${item.title || "Saved Study Item"}\n${item.mode || "study"} · ${item.created_at || ""}\n\n${item.text || ""}`;
-      }
-
-      async function deleteStudyItem(itemId) {
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("item_id", itemId);
-        const res = await csrfFetch("/chat/study/delete", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-
-        await loadStudyLibrary();
-        studyView.style.display = "none";
-        studyView.textContent = "";
-      }
-
-      async function saveLastStudy() {
-        const o = owner();
-        const title = window.prompt("Optional title for saved study item:", "") || "";
-        const form = new FormData();
-        form.append("owner", o);
-        form.append("title", title.trim());
-
-        const res = await csrfFetch("/chat/study/save-last", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-
-        if (!res.ok) {
-          addBubble("assistant", "No generated answer found yet to save.", new Date().toISOString());
-          return;
-        }
-
-        const data = await res.json();
-        const savedTitle = data?.item?.title || "Saved Study Item";
-        addBubble("assistant", `Saved: ${savedTitle}`, new Date().toISOString());
-
-        if (workspace.classList.contains("tool-open") && document.getElementById("toolLibrary").classList.contains("active")) {
-          await loadStudyLibrary();
-        }
-      }
-
-      async function loadQuizHistory() {
-        const o = owner();
-        const res = await fetch(`/chat/quiz/history?owner=${encodeURIComponent(o)}`);
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-
-        const data = await res.json();
-        const attempts = data.attempts || [];
-        const stats = data.stats || { count: 0, avg_pct: 0 };
-        quizStats.textContent = `${stats.count} attempts · avg ${stats.avg_pct}%`;
-
-        quizList.innerHTML = "";
-        if (!attempts.length) {
-          const hint = document.createElement("div");
-          hint.className = "hint";
-          hint.textContent = "No attempts yet.";
-          quizList.appendChild(hint);
-          return;
-        }
-
-        for (const a of attempts) {
-          const card = document.createElement("div");
-          card.className = "item";
-          appendTextBlock(card, "item-title", a.title || "Quiz Attempt");
-          appendTextBlock(card, "item-meta", `${a.score}/${a.total} (${a.pct}%) · ${a.created_at || ""}`);
-          appendTextBlock(card, "item-preview", a.notes || "");
-
-          const actions = document.createElement("div");
-          actions.className = "item-actions";
-
-          const delBtn = document.createElement("button");
-          delBtn.type = "button";
-          delBtn.className = "danger";
-          setIconButtonLabel(delBtn, "✕", "Delete");
-          delBtn.addEventListener("click", () => deleteQuizAttempt(a.id));
-
-          actions.appendChild(delBtn);
-          card.appendChild(actions);
-          quizList.appendChild(card);
-        }
-      }
-
-      async function saveQuizAttempt() {
-        const score = parseInt(quizScoreEl.value || "", 10);
-        const total = parseInt(quizTotalEl.value || "", 10);
-        if (!Number.isFinite(score) || !Number.isFinite(total)) return;
-
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("title", quizTitleEl.value.trim());
-        form.append("score", String(score));
-        form.append("total", String(total));
-        form.append("notes", quizNotesEl.value.trim());
-
-        const res = await csrfFetch("/chat/quiz/add", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-
-        quizTitleEl.value = "";
-        quizScoreEl.value = "";
-        quizTotalEl.value = "";
-        quizNotesEl.value = "";
-        await loadQuizHistory();
-      }
-
-      async function deleteQuizAttempt(attemptId) {
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("attempt_id", attemptId);
-        const res = await csrfFetch("/chat/quiz/delete", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        await loadQuizHistory();
-      }
-
-      async function loadFlashcards() {
-        const o = owner();
-        const dueOnly = fcDueOnlyEl.checked ? "true" : "false";
-        const res = await fetch(`/chat/flashcards/list?owner=${encodeURIComponent(o)}&due_only=${dueOnly}`);
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-
-        const data = await res.json();
-        const cards = data.cards || [];
-        flashcardList.innerHTML = "";
-
-        if (!cards.length) {
-          const hint = document.createElement("div");
-          hint.className = "hint";
-          hint.textContent = "No cards for this filter.";
-          flashcardList.appendChild(hint);
-          return;
-        }
-
-        for (const c of cards) {
-          const card = document.createElement("div");
-          card.className = "item";
-          appendTextBlock(card, "item-title", c.front || "");
-          appendTextBlock(
-            card,
-            "item-meta",
-            `due: ${c.due_at || ""} · interval: ${c.interval_days || 0}d · streak: ${c.streak || 0}`
-          );
-          const backPreview = appendTextBlock(card, "item-preview", c.back || "");
-          backPreview.style.display = "none";
-          backPreview.id = `back-${c.id || ""}`;
-          appendTextBlock(card, "item-meta", c.tags || "");
-
-          const actions = document.createElement("div");
-          actions.className = "item-actions";
-
-          const showBtn = document.createElement("button");
-          showBtn.type = "button";
-          setIconButtonLabel(showBtn, "◷", "Show");
-          showBtn.addEventListener("click", () => {
-            const back = document.getElementById(`back-${c.id}`);
-            const visible = back.style.display !== "none";
-            back.style.display = visible ? "none" : "block";
-            setIconButtonLabel(showBtn, "◷", visible ? "Show" : "Hide");
-          });
-
-          for (const r of ["again", "hard", "good", "easy"]) {
-            const b = document.createElement("button");
-            b.type = "button";
-            b.textContent = r[0].toUpperCase() + r.slice(1);
-            b.addEventListener("click", () => reviewFlashcard(c.id, r));
-            actions.appendChild(b);
-          }
-
-          const delBtn = document.createElement("button");
-          delBtn.type = "button";
-          delBtn.className = "danger";
-          setIconButtonLabel(delBtn, "✕", "Delete");
-          delBtn.addEventListener("click", () => deleteFlashcard(c.id));
-
-          actions.prepend(showBtn);
-          actions.appendChild(delBtn);
-          card.appendChild(actions);
-          flashcardList.appendChild(card);
-        }
-      }
-
-      async function addFlashcard() {
-        const front = fcFrontEl.value.trim();
-        const back = fcBackEl.value.trim();
-        if (!front || !back) return;
-
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("front", front);
-        form.append("back", back);
-        form.append("tags", fcTagsEl.value.trim());
-
-        const res = await csrfFetch("/chat/flashcards/add", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) return;
-
-        fcFrontEl.value = "";
-        fcBackEl.value = "";
-        fcTagsEl.value = "";
-        await loadFlashcards();
-      }
-
-      async function reviewFlashcard(cardId, rating) {
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("card_id", cardId);
-        form.append("rating", rating);
-        const res = await csrfFetch("/chat/flashcards/review", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        await loadFlashcards();
-      }
-
-      async function deleteFlashcard(cardId) {
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("card_id", cardId);
-        const res = await csrfFetch("/chat/flashcards/delete", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        await loadFlashcards();
+        ingestOutEl.textContent = data?.assistant?.text || `File ingest failed (HTTP ${res.status}).`;
+        ingestFileEl.value = "";
       }
 
       sendBtn.addEventListener("click", sendStream);
       clearBtn.addEventListener("click", clearChat);
       logoutBtn.addEventListener("click", logout);
-      saveStudyBtn.addEventListener("click", saveLastStudy);
-      saveSoulBtn.addEventListener("click", saveSoulStyle);
-      clearSoulBtn.addEventListener("click", clearSoulStyle);
-      saveWellnessBtn.addEventListener("click", saveWellnessSettings);
+      settingsBtn.addEventListener("click", () => {
+        window.location.href = `/settings?owner=${encodeURIComponent(owner())}`;
+      });
+      refreshHistoryBtn.addEventListener("click", loadSessions);
       newChatBtn.addEventListener("click", startNewChat);
+      ingestUrlBtn.addEventListener("click", ingestUrl);
+      ingestFileBtn.addEventListener("click", ingestFile);
       newChatNameEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
           startNewChat();
         }
       });
-      refreshHistoryBtn.addEventListener("click", loadSessions);
-
-      showIngestBtn.addEventListener("click", () => openTool("toolIngest", "Ingest"));
-      showLibraryBtn.addEventListener("click", () => openTool("toolLibrary", "Study Library"));
-      showQuizBtn.addEventListener("click", () => openTool("toolQuiz", "Quiz Attempts"));
-      showFlashcardsBtn.addEventListener("click", () => openTool("toolFlashcards", "Flashcards"));
-      closeToolBtn.addEventListener("click", closeTool);
-
-      ingestUrlBtn.addEventListener("click", ingestUrl);
-      ingestFileBtn.addEventListener("click", ingestFile);
-      saveQuizAttemptBtn.addEventListener("click", saveQuizAttempt);
-      addFlashcardBtn.addEventListener("click", addFlashcard);
-      refreshFlashcardsBtn.addEventListener("click", loadFlashcards);
-      fcDueOnlyEl.addEventListener("change", loadFlashcards);
-
+      ingestUrlEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          ingestUrl();
+        }
+      });
       ownerEl.addEventListener("change", async () => {
         owner();
-        await loadSoulStyle();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(owner())}`);
         if (!(await ensureAuth(res))) return;
         if (res.ok) {
@@ -1401,7 +656,6 @@
           renderHistory(data.history || []);
         }
       });
-
       msgEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
@@ -1409,10 +663,8 @@
         }
       });
 
-      scrollToBottom();
       owner();
-      loadSoulStyle();
-      loadWellnessSettings();
+      scrollToBottom();
       loadSessions();
     </script>
   </body>
