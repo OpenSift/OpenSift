@@ -263,7 +263,7 @@ Docker notes:
 Image versioning notes:
 - Local `docker compose` builds are tagged as `opensift-opensift-gateway:latest`.
 - For external publishing, use version-aligned tags, e.g.:
-  - `ghcr.io/opensift/opensift-gateway:1.3.1-alpha`
+  - `ghcr.io/opensift/opensift-gateway:1.4.0-alpha`
   - `ghcr.io/opensift/opensift-gateway:latest`
 
 

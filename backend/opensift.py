@@ -19,7 +19,7 @@ from app.logging_utils import configure_logging
 from app.security_audit import format_audit_report, run_security_audit
 
 logger = configure_logging("opensift.launcher")
-OPENSIFT_VERSION = "1.3.1-alpha"
+OPENSIFT_VERSION = "1.4.0-alpha"
 
 
 def run_ui(host: str, port: int, reload: bool) -> None:

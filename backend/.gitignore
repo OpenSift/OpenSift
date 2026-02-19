@@ -3,6 +3,7 @@
 *.env
 *.log
 .opensift_logs/*
+.opensift_sources/*
 SOUL.md
 .codex/
 .claude/

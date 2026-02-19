@@ -1,5 +1,65 @@
 # OpenSift Release Notes
 
+## v1.4.0-alpha
+Release date: 2026-02-19
+
+This release introduces a full persistent Library workflow for source management, with a dedicated UI, richer organization controls, and tighter chat integration.
+
+### Highlights
+- Added a dedicated **Library page** separate from chat, with browse/search and source detail views.
+- Added persistent source storage for notes, URLs, PDFs, text files, and OCR'd image uploads.
+- Added chat-side **pinned library context** selection so users can force specific sources into prompt context.
+- Added library pagination, sorting, folder/tag filtering, and metadata editing for better large-collection usability.
+
+### Added
+- New source storage module:
+  - `backend/source_store.py`
+  - owner-scoped source manifests
+  - persistent text/blob file handling
+  - item update/delete helpers
+- New Library endpoints in `backend/ui_app.py`:
+  - `GET /library`
+  - `GET /chat/library/list`
+  - `GET /chat/library/get`
+  - `POST /chat/library/note`
+  - `POST /chat/library/url`
+  - `POST /chat/library/upload`
+  - `POST /chat/library/update`
+  - `POST /chat/library/delete`
+  - `GET /chat/library/download`
+- New Library template:
+  - `backend/templates/library.html`
+  - includes upload progress with percentage + ETA
+- New chat Library integration:
+  - `backend/templates/chat.html`
+  - “Library” navigation button
+  - modal to select pinned library items for chat context
+
+### Changed
+- Retrieval/generation flow now supports optional `selected_library_ids` in `/chat/stream`:
+  - selected library items are injected as pinned passages before normal semantic retrieval context.
+- Library list API now supports:
+  - pagination (`page`, `page_size`)
+  - sorting (`sort_by`, `sort_dir`)
+  - filtering (`kind`, `folder`, `tags`, `q`)
+- Source metadata now supports:
+  - `folder`
+  - `tags`
+
+### Testing
+- Added tests:
+  - `backend/tests/test_library_features.py`
+  - library pagination/sort/filter
+  - library metadata updates
+  - pinned library context in chat stream
+- Updated UI test coverage:
+  - `backend/tests/test_settings_and_stream_ui.py`
+
+### Versioning
+- Bumped app version to `1.4.0-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
 ## v1.3.1-alpha
 Release date: 2026-02-19
 

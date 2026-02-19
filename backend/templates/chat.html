@@ -50,6 +50,8 @@
       .history-wrap { min-height: 0; overflow: auto; padding: 10px; }
       .history-list { display: grid; gap: 8px; }
       .ingest-stack { display: grid; gap: 8px; }
+      .flashcards-stack { display: grid; gap: 8px; }
+      .library-stack { display: grid; gap: 8px; }
       .out {
         border: 1px dashed var(--line);
         border-radius: 10px;
@@ -68,6 +70,30 @@
       .session-item-title { font-size: 13px; font-weight: 600; }
       .session-item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
       .session-item-actions { margin-top: 8px; display: flex; gap: 6px; }
+      .fc-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(255,255,255,.02);
+      }
+      .fc-front { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+      .fc-back {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: pre-wrap;
+        margin-bottom: 6px;
+      }
+      .fc-meta { font-size: 11px; color: var(--muted); }
+      .fc-actions {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .fc-actions button {
+        padding: 6px 8px;
+        font-size: 11px;
+      }
       .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
       .topbar {
         border-bottom: 1px solid var(--line);
@@ -133,6 +159,55 @@
       button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
       button.danger { background: rgba(200, 91, 91, .2); border-color: rgba(200, 91, 91, .4); }
       .hint { font-size: 11px; color: var(--muted); }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+        padding: 16px;
+      }
+      .modal-overlay.open { display: flex; }
+      .modal {
+        width: min(980px, 100%);
+        max-height: 88vh;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        padding: 14px;
+      }
+      .modal-title { font-size: 16px; font-weight: 650; margin-bottom: 8px; }
+      .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+      .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+      .modal-list { display: grid; gap: 8px; }
+      .preview-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(255,255,255,.02);
+      }
+      .preview-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+      .preview-head input { width: auto; }
+      .preview-front { font-size: 13px; font-weight: 600; }
+      .preview-back { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+      .preview-fields { display: grid; gap: 6px; margin-top: 6px; }
+      .preview-fields input,
+      .preview-fields textarea {
+        width: 100%;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255,255,255,.04);
+        padding: 7px 8px;
+        font-size: 12px;
+      }
+      .preview-fields textarea {
+        min-height: 84px;
+        resize: vertical;
+      }
       @media (max-width: 900px) {
         .app { grid-template-columns: 1fr; }
         .controls { grid-template-columns: 1fr 1fr; }
@@ -147,6 +222,7 @@
         <div class="section" style="display:flex; gap:8px;">
           <button id="refreshHistoryBtn" type="button" style="width:100%;">Refresh</button>
           <button id="settingsBtn" type="button" style="width:100%;">Settings</button>
+          <button id="libraryBtn" type="button" style="width:100%;">Library</button>
         </div>
 
         <div class="section">
@@ -171,6 +247,31 @@
             <input id="ingestFile" type="file" />
             <button id="ingestFileBtn" type="button">Upload + Ingest</button>
             <div class="out" id="ingestOut">No ingest action yet.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="hint" style="margin-bottom:6px;">Pinned Library Context</div>
+          <div class="library-stack">
+            <button id="selectLibraryBtn" type="button">Select Library Items</button>
+            <div class="out" id="libraryCtxOut">No pinned library items.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="hint" style="margin-bottom:6px;">Flashcards</div>
+          <div class="flashcards-stack">
+            <input id="flashFront" placeholder="Front (question/concept)" />
+            <input id="flashBack" placeholder="Back (answer/explanation)" />
+            <input id="flashTags" placeholder="Tags (comma-separated)" />
+            <div style="display:flex; gap:8px;">
+              <button id="flashAddBtn" type="button" class="primary" style="width:100%;">Add Card</button>
+              <button id="flashFromReplyBtn" type="button" style="width:100%;">From Last Reply</button>
+              <button id="flashRefreshBtn" type="button" style="width:100%;">Refresh</button>
+            </div>
+            <label class="hint"><input id="flashDueOnly" type="checkbox" /> Due only</label>
+            <div class="out" id="flashOut">No flashcard action yet.</div>
+            <div id="flashList" style="display:grid; gap:8px;"></div>
           </div>
         </div>
 
@@ -261,6 +362,33 @@
         </div>
       </main>
     </div>
+    <div id="flashPreviewModal" class="modal-overlay" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-title">Create Flashcards Preview</div>
+        <div class="modal-sub">Select the cards you want to create from the latest assistant reply.</div>
+        <div id="flashPreviewList" class="modal-list"></div>
+        <div class="modal-actions">
+          <button id="flashPreviewCancelBtn" type="button">Cancel</button>
+          <button id="flashPreviewCreateBtn" type="button" class="primary">Create Selected</button>
+        </div>
+      </div>
+    </div>
+    <div id="librarySelectModal" class="modal-overlay" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-title">Select Library Context</div>
+        <div class="modal-sub">Pinned items are injected into the next prompt in addition to semantic retrieval.</div>
+        <div style="display:grid; grid-template-columns: 1fr 180px; gap:8px; margin-bottom:10px;">
+          <input id="librarySearchInput" placeholder="Search library title/preview..." />
+          <button id="libraryRefreshBtn" type="button">Refresh</button>
+        </div>
+        <div id="librarySelectList" class="modal-list"></div>
+        <div class="modal-actions">
+          <button id="librarySelectCancelBtn" type="button">Cancel</button>
+          <button id="libraryClearBtn" type="button">Clear All</button>
+          <button id="librarySelectApplyBtn" type="button" class="primary">Apply Selection</button>
+        </div>
+      </div>
+    </div>
 
     <script>
       const chat = document.getElementById("chat");
@@ -280,6 +408,7 @@
       const clearBtn = document.getElementById("clearBtn");
       const logoutBtn = document.getElementById("logoutBtn");
       const settingsBtn = document.getElementById("settingsBtn");
+      const libraryBtn = document.getElementById("libraryBtn");
       const newChatBtn = document.getElementById("newChatBtn");
       const newChatNameEl = document.getElementById("newChatName");
       const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
@@ -290,8 +419,33 @@
       const ingestFileEl = document.getElementById("ingestFile");
       const ingestFileBtn = document.getElementById("ingestFileBtn");
       const ingestOutEl = document.getElementById("ingestOut");
+      const flashFrontEl = document.getElementById("flashFront");
+      const flashBackEl = document.getElementById("flashBack");
+      const flashTagsEl = document.getElementById("flashTags");
+      const flashAddBtn = document.getElementById("flashAddBtn");
+      const flashFromReplyBtn = document.getElementById("flashFromReplyBtn");
+      const flashRefreshBtn = document.getElementById("flashRefreshBtn");
+      const flashDueOnlyEl = document.getElementById("flashDueOnly");
+      const flashOutEl = document.getElementById("flashOut");
+      const flashListEl = document.getElementById("flashList");
+      const selectLibraryBtn = document.getElementById("selectLibraryBtn");
+      const libraryCtxOutEl = document.getElementById("libraryCtxOut");
+      const flashPreviewModalEl = document.getElementById("flashPreviewModal");
+      const flashPreviewListEl = document.getElementById("flashPreviewList");
+      const flashPreviewCancelBtn = document.getElementById("flashPreviewCancelBtn");
+      const flashPreviewCreateBtn = document.getElementById("flashPreviewCreateBtn");
+      const librarySelectModalEl = document.getElementById("librarySelectModal");
+      const librarySearchInputEl = document.getElementById("librarySearchInput");
+      const libraryRefreshBtn = document.getElementById("libraryRefreshBtn");
+      const librarySelectListEl = document.getElementById("librarySelectList");
+      const librarySelectCancelBtn = document.getElementById("librarySelectCancelBtn");
+      const libraryClearBtn = document.getElementById("libraryClearBtn");
+      const librarySelectApplyBtn = document.getElementById("librarySelectApplyBtn");
       const busy = document.getElementById("busy");
       const csrfToken = document.body.dataset.csrf || "";
+      let pendingFlashPreviewCards = [];
+      let selectedLibraryIds = [];
+      let libraryModalSnapshot = [];
 
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -316,6 +470,34 @@
         ownerEl.value = normalized;
         ownerLabel.textContent = normalized;
         return normalized;
+      }
+
+      function selectedLibraryKey() {
+        return `opensift_selected_library::${owner()}`;
+      }
+
+      function loadSelectedLibraryIds() {
+        try {
+          const raw = localStorage.getItem(selectedLibraryKey()) || "[]";
+          const arr = JSON.parse(raw);
+          selectedLibraryIds = Array.isArray(arr) ? arr.filter(x => typeof x === "string") : [];
+        } catch (_) {
+          selectedLibraryIds = [];
+        }
+        renderSelectedLibraryStatus();
+      }
+
+      function saveSelectedLibraryIds() {
+        localStorage.setItem(selectedLibraryKey(), JSON.stringify(selectedLibraryIds.slice(0, 8)));
+        renderSelectedLibraryStatus();
+      }
+
+      function renderSelectedLibraryStatus() {
+        if (!selectedLibraryIds.length) {
+          libraryCtxOutEl.textContent = "No pinned library items.";
+          return;
+        }
+        libraryCtxOutEl.textContent = `${selectedLibraryIds.length} pinned item(s): ${selectedLibraryIds.join(", ")}`;
       }
 
       function addBubble(role, text, ts) {
@@ -408,6 +590,7 @@
         form.append("thinking_level", thinkingLevelEl.value || "medium");
         form.append("show_thinking", showThinkingEl.checked ? "true" : "false");
         form.append("true_streaming", trueStreamingEl.checked ? "true" : "false");
+        form.append("selected_library_ids", selectedLibraryIds.join(","));
         if (normalized.note) {
           statusEl.textContent = normalized.note;
           pushStatus(normalized.note);
@@ -493,6 +676,87 @@
           setBusy(false);
           await loadSessions();
         }
+      }
+
+      async function openLibrarySelectModal() {
+        await loadLibraryChoices();
+        librarySelectModalEl.classList.add("open");
+        librarySelectModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      function closeLibrarySelectModal() {
+        librarySelectModalEl.classList.remove("open");
+        librarySelectModalEl.setAttribute("aria-hidden", "true");
+      }
+
+      async function loadLibraryChoices() {
+        const o = owner();
+        const q = (librarySearchInputEl.value || "").trim();
+        const u = `/chat/library/list?owner=${encodeURIComponent(o)}&q=${encodeURIComponent(q)}&page=1&page_size=100&sort_by=created_at&sort_dir=desc`;
+        const res = await fetch(u);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          librarySelectListEl.innerHTML = `<div class="hint">Failed to load library sources.</div>`;
+          return;
+        }
+        const data = await res.json();
+        const items = data.items || [];
+        libraryModalSnapshot = items;
+        renderLibraryChoiceList(items);
+      }
+
+      function renderLibraryChoiceList(items) {
+        librarySelectListEl.innerHTML = "";
+        if (!items.length) {
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No library items found.";
+          librarySelectListEl.appendChild(hint);
+          return;
+        }
+        for (const item of items) {
+          const row = document.createElement("div");
+          row.className = "preview-card";
+          const head = document.createElement("div");
+          head.className = "preview-head";
+
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.dataset.id = String(item.id || "");
+          check.checked = selectedLibraryIds.includes(String(item.id || ""));
+          head.appendChild(check);
+
+          const front = document.createElement("div");
+          front.className = "preview-front";
+          front.textContent = item.title || "Untitled";
+          head.appendChild(front);
+
+          const back = document.createElement("div");
+          back.className = "preview-back";
+          back.textContent = item.preview || "";
+
+          const meta = document.createElement("div");
+          meta.className = "hint";
+          meta.textContent = `${item.kind || "item"} · ${item.folder || "(no folder)"} · ${item.tags || "(no tags)"}`;
+
+          row.appendChild(head);
+          row.appendChild(back);
+          row.appendChild(meta);
+          librarySelectListEl.appendChild(row);
+        }
+      }
+
+      function applyLibrarySelection() {
+        const checks = Array.from(librarySelectListEl.querySelectorAll('input[type="checkbox"][data-id]'));
+        const next = [];
+        for (const c of checks) {
+          if (!c.checked) continue;
+          next.push(c.dataset.id);
+          if (next.length >= 8) break;
+        }
+        selectedLibraryIds = next;
+        saveSelectedLibraryIds();
+        closeLibrarySelectModal();
       }
 
       async function clearChat() {
@@ -625,16 +889,390 @@
         ingestFileEl.value = "";
       }
 
+      function renderFlashcards(cards) {
+        flashListEl.innerHTML = "";
+        const rows = cards || [];
+        if (!rows.length) {
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No flashcards for this owner.";
+          flashListEl.appendChild(hint);
+          return;
+        }
+
+        for (const c of rows) {
+          const card = document.createElement("div");
+          card.className = "fc-card";
+
+          const front = document.createElement("div");
+          front.className = "fc-front";
+          front.textContent = c.front || "(no front)";
+          card.appendChild(front);
+
+          const back = document.createElement("div");
+          back.className = "fc-back";
+          back.textContent = c.back || "";
+          back.style.display = "none";
+          card.appendChild(back);
+
+          const meta = document.createElement("div");
+          meta.className = "fc-meta";
+          const due = c.due_at ? `due: ${String(c.due_at).slice(0, 19).replace("T", " ")}` : "due: n/a";
+          const tags = c.tags ? ` | tags: ${c.tags}` : "";
+          meta.textContent = `${due}${tags}`;
+          card.appendChild(meta);
+
+          const actions = document.createElement("div");
+          actions.className = "fc-actions";
+
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.textContent = "Show Back";
+          toggleBtn.addEventListener("click", () => {
+            const hidden = back.style.display === "none";
+            back.style.display = hidden ? "block" : "none";
+            toggleBtn.textContent = hidden ? "Hide Back" : "Show Back";
+          });
+          actions.appendChild(toggleBtn);
+
+          const ratings = ["again", "hard", "good", "easy"];
+          for (const rating of ratings) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = rating;
+            btn.addEventListener("click", async () => {
+              const form = new FormData();
+              form.append("owner", owner());
+              form.append("card_id", c.id || "");
+              form.append("rating", rating);
+              const res = await csrfFetch("/chat/flashcards/review", { method: "POST", body: form });
+              if (!(await ensureAuth(res))) return;
+              const data = await res.json();
+              flashOutEl.textContent = data.ok ? `Reviewed: ${rating}` : `Review failed (${data.error || res.status})`;
+              await loadFlashcards();
+            });
+            actions.appendChild(btn);
+          }
+
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "danger";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", async () => {
+            const form = new FormData();
+            form.append("owner", owner());
+            form.append("card_id", c.id || "");
+            const res = await csrfFetch("/chat/flashcards/delete", { method: "POST", body: form });
+            if (!(await ensureAuth(res))) return;
+            const data = await res.json();
+            flashOutEl.textContent = data.ok ? "Deleted card." : `Delete failed (${data.error || res.status})`;
+            await loadFlashcards();
+          });
+          actions.appendChild(delBtn);
+
+          card.appendChild(actions);
+          flashListEl.appendChild(card);
+        }
+      }
+
+      async function loadFlashcards() {
+        const o = owner();
+        const dueOnly = flashDueOnlyEl.checked ? "true" : "false";
+        const res = await fetch(`/chat/flashcards/list?owner=${encodeURIComponent(o)}&due_only=${dueOnly}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          flashOutEl.textContent = `Load failed (HTTP ${res.status}).`;
+          return;
+        }
+        const data = await res.json();
+        renderFlashcards(data.cards || []);
+      }
+
+      async function addFlashcard() {
+        const front = (flashFrontEl.value || "").trim();
+        const back = (flashBackEl.value || "").trim();
+        const tags = (flashTagsEl.value || "").trim();
+        if (!front || !back) {
+          flashOutEl.textContent = "Front and back are required.";
+          return;
+        }
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("front", front);
+        form.append("back", back);
+        form.append("tags", tags);
+        const res = await csrfFetch("/chat/flashcards/add", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          flashOutEl.textContent = `Add failed (${data.error || res.status}).`;
+          return;
+        }
+        flashFrontEl.value = "";
+        flashBackEl.value = "";
+        flashTagsEl.value = "";
+        flashOutEl.textContent = "Added flashcard.";
+        await loadFlashcards();
+      }
+
+      function makeFrontFromText(text) {
+        const line = (text || "")
+          .replace(/\s+/g, " ")
+          .replace(/^#+\s*/g, "")
+          .trim();
+        if (!line) return "From latest reply";
+        return line.slice(0, 120);
+      }
+
+      function buildFlashcardsFromReply(text) {
+        const raw = (text || "").trim();
+        if (!raw) return [];
+        const lines = raw.split(/\r?\n/);
+
+        const sections = [];
+        let currentTitle = "";
+        let currentBody = [];
+
+        const flush = () => {
+          const body = currentBody.join("\n").trim();
+          if (!body) return;
+          sections.push({
+            title: currentTitle.trim(),
+            body,
+          });
+          currentBody = [];
+        };
+
+        for (const lineRaw of lines) {
+          const line = lineRaw.trim();
+          const isMdHeading = /^#{1,6}\s+/.test(line);
+          const isColonHeading = /^[A-Z][A-Za-z0-9 ()/_-]{2,60}:$/.test(line);
+          if (isMdHeading || isColonHeading) {
+            flush();
+            currentTitle = line.replace(/^#{1,6}\s+/, "").replace(/:$/, "").trim();
+            continue;
+          }
+          currentBody.push(lineRaw);
+        }
+        flush();
+
+        // If headings were not present, fall back to paragraph blocks.
+        if (!sections.length) {
+          const blocks = raw
+            .split(/\n\s*\n+/)
+            .map((b) => b.trim())
+            .filter(Boolean);
+          for (const b of blocks) {
+            sections.push({ title: "", body: b });
+          }
+        }
+
+        const cards = [];
+        for (const s of sections) {
+          const front = s.title ? s.title.slice(0, 120) : makeFrontFromText(s.body);
+          const back = s.body.slice(0, 1500).trim();
+          if (!front || !back) continue;
+          cards.push({ front, back });
+          if (cards.length >= 8) break;
+        }
+        return cards;
+      }
+
+      async function createFlashcard(ownerName, front, back, tags = "from-chat") {
+        const form = new FormData();
+        form.append("owner", ownerName);
+        form.append("front", front);
+        form.append("back", back);
+        form.append("tags", tags);
+        const res = await csrfFetch("/chat/flashcards/add", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return { ok: false, authRedirect: true };
+        const payload = await res.json();
+        return { ok: !!(res.ok && payload.ok), error: payload.error || `HTTP ${res.status}` };
+      }
+
+      function closeFlashPreviewModal() {
+        flashPreviewModalEl.classList.remove("open");
+        flashPreviewModalEl.setAttribute("aria-hidden", "true");
+      }
+
+      function openFlashPreviewModal(cards) {
+        pendingFlashPreviewCards = cards.slice();
+        flashPreviewListEl.innerHTML = "";
+
+        for (let i = 0; i < cards.length; i++) {
+          const c = cards[i];
+          const row = document.createElement("div");
+          row.className = "preview-card";
+
+          const head = document.createElement("div");
+          head.className = "preview-head";
+
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.checked = true;
+          check.dataset.index = String(i);
+
+          const front = document.createElement("div");
+          front.className = "preview-front";
+          front.textContent = c.front || "(untitled)";
+
+          head.appendChild(check);
+          head.appendChild(front);
+          row.appendChild(head);
+
+          const fields = document.createElement("div");
+          fields.className = "preview-fields";
+
+          const frontInput = document.createElement("input");
+          frontInput.type = "text";
+          frontInput.value = c.front || "";
+          frontInput.placeholder = "Card front";
+          frontInput.dataset.field = "front";
+          frontInput.dataset.index = String(i);
+
+          const backInput = document.createElement("textarea");
+          backInput.value = c.back || "";
+          backInput.placeholder = "Card back";
+          backInput.dataset.field = "back";
+          backInput.dataset.index = String(i);
+
+          fields.appendChild(frontInput);
+          fields.appendChild(backInput);
+          row.appendChild(fields);
+
+          flashPreviewListEl.appendChild(row);
+        }
+
+        flashPreviewModalEl.classList.add("open");
+        flashPreviewModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      async function createSelectedPreviewFlashcards() {
+        const o = owner();
+        const checks = Array.from(flashPreviewListEl.querySelectorAll('input[type="checkbox"][data-index]'));
+        const edited = new Map();
+        const fieldEls = Array.from(flashPreviewListEl.querySelectorAll('[data-field][data-index]'));
+        for (const el of fieldEls) {
+          const idx = Number(el.dataset.index || "-1");
+          const field = el.dataset.field || "";
+          if (idx < 0 || !field) continue;
+          if (!edited.has(idx)) edited.set(idx, { front: "", back: "" });
+          const bucket = edited.get(idx);
+          bucket[field] = (el.value || "").trim();
+        }
+
+        const selected = [];
+        for (const check of checks) {
+          if (!check.checked) continue;
+          const idx = Number(check.dataset.index || "-1");
+          if (idx >= 0 && idx < pendingFlashPreviewCards.length) {
+            const base = pendingFlashPreviewCards[idx];
+            const patch = edited.get(idx) || {};
+            const front = (patch.front || base.front || "").trim();
+            const back = (patch.back || base.back || "").trim();
+            if (!front || !back) continue;
+            selected.push({ front, back });
+          }
+        }
+        if (!selected.length) {
+          flashOutEl.textContent = "No valid cards selected (front/back are required).";
+          closeFlashPreviewModal();
+          return;
+        }
+
+        flashOutEl.textContent = `Creating ${selected.length} selected flashcard(s)...`;
+        let created = 0;
+        let failed = 0;
+        for (const card of selected) {
+          const result = await createFlashcard(o, card.front, card.back, "from-chat,auto-split");
+          if (result.authRedirect) return;
+          if (result.ok) created += 1;
+          else failed += 1;
+        }
+
+        closeFlashPreviewModal();
+        flashOutEl.textContent = `Created ${created} flashcard(s)${failed ? ` (${failed} failed)` : ""}.`;
+        await loadFlashcards();
+      }
+
+      async function addFlashcardFromLastReply() {
+        const o = owner();
+        flashOutEl.textContent = "Creating flashcards from latest assistant reply...";
+        const exp = await fetch(`/chat/session/export?owner=${encodeURIComponent(o)}`);
+        if (!(await ensureAuth(exp))) return;
+        if (!exp.ok) {
+          flashOutEl.textContent = `Load failed (HTTP ${exp.status}).`;
+          return;
+        }
+        const data = await exp.json();
+        const history = data.history || [];
+        let lastAssistantText = "";
+        for (let i = history.length - 1; i >= 0; i--) {
+          const m = history[i];
+          if (m && m.role === "assistant" && (m.text || "").trim()) {
+            lastAssistantText = (m.text || "").trim();
+            break;
+          }
+        }
+        if (!lastAssistantText) {
+          flashOutEl.textContent = "No assistant reply found for this owner.";
+          return;
+        }
+
+        const cards = buildFlashcardsFromReply(lastAssistantText);
+        if (!cards.length) {
+          flashOutEl.textContent = "Could not extract card sections from latest reply.";
+          return;
+        }
+        openFlashPreviewModal(cards);
+      }
+
       sendBtn.addEventListener("click", sendStream);
       clearBtn.addEventListener("click", clearChat);
       logoutBtn.addEventListener("click", logout);
       settingsBtn.addEventListener("click", () => {
         window.location.href = `/settings?owner=${encodeURIComponent(owner())}`;
       });
+      libraryBtn.addEventListener("click", () => {
+        window.location.href = `/library?owner=${encodeURIComponent(owner())}`;
+      });
       refreshHistoryBtn.addEventListener("click", loadSessions);
       newChatBtn.addEventListener("click", startNewChat);
       ingestUrlBtn.addEventListener("click", ingestUrl);
       ingestFileBtn.addEventListener("click", ingestFile);
+      flashAddBtn.addEventListener("click", addFlashcard);
+      flashFromReplyBtn.addEventListener("click", addFlashcardFromLastReply);
+      flashRefreshBtn.addEventListener("click", loadFlashcards);
+      flashPreviewCancelBtn.addEventListener("click", closeFlashPreviewModal);
+      flashPreviewCreateBtn.addEventListener("click", createSelectedPreviewFlashcards);
+      flashPreviewModalEl.addEventListener("click", (e) => {
+        if (e.target === flashPreviewModalEl) closeFlashPreviewModal();
+      });
+      selectLibraryBtn.addEventListener("click", openLibrarySelectModal);
+      libraryRefreshBtn.addEventListener("click", loadLibraryChoices);
+      librarySearchInputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          loadLibraryChoices();
+        }
+      });
+      librarySelectCancelBtn.addEventListener("click", closeLibrarySelectModal);
+      libraryClearBtn.addEventListener("click", () => {
+        selectedLibraryIds = [];
+        saveSelectedLibraryIds();
+        renderLibraryChoiceList(libraryModalSnapshot);
+      });
+      librarySelectApplyBtn.addEventListener("click", applyLibrarySelection);
+      librarySelectModalEl.addEventListener("click", (e) => {
+        if (e.target === librarySelectModalEl) closeLibrarySelectModal();
+      });
+      flashDueOnlyEl.addEventListener("change", loadFlashcards);
+      flashBackEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          addFlashcard();
+        }
+      });
       newChatNameEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -649,12 +1287,14 @@
       });
       ownerEl.addEventListener("change", async () => {
         owner();
+        loadSelectedLibraryIds();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(owner())}`);
         if (!(await ensureAuth(res))) return;
         if (res.ok) {
           const data = await res.json();
           renderHistory(data.history || []);
         }
+        await loadFlashcards();
       });
       msgEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -664,8 +1304,10 @@
       });
 
       owner();
+      loadSelectedLibraryIds();
       scrollToBottom();
       loadSessions();
+      loadFlashcards();
     </script>
   </body>
 </html>

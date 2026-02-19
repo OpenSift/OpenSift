@@ -96,7 +96,7 @@ If behavior changes, update:
 
 If a release is being cut, keep runtime and image versioning aligned:
 - App version constants (e.g., `OPENSIFT_VERSION`) should match the release notes version.
-- Published Docker image tags should include both the release tag and `latest` (for example, `1.3.1-alpha` and `latest`).
+- Published Docker image tags should include both the release tag and `latest` (for example, `1.4.0-alpha` and `latest`).
 
 If you maintain the docs site in a separate repository (`opensift.github.io`), keep that content in sync as part of your release process.
 

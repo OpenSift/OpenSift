@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -67,6 +67,19 @@ from study_store import (
 )
 from quiz_store import DEFAULT_DIR as QUIZ_DIR, add_attempt, delete_attempt, load_attempts
 from flashcard_store import DEFAULT_DIR as FLASHCARD_DIR, add_card, delete_card, due_cards, load_cards, review_card
+from source_store import (
+    DEFAULT_DIR as SOURCE_DIR,
+    add_item as add_source_item,
+    delete_item as delete_source_item,
+    get_item as get_source_item,
+    load_items as load_source_items,
+    new_source_id,
+    read_text_blob as read_source_text_blob,
+    remove_file as remove_source_file,
+    update_item as update_source_item,
+    write_binary_blob as write_source_binary_blob,
+    write_text_blob as write_source_text_blob,
+)
 
 # -----------------------------------------------------------------------------
 # Setup
@@ -76,7 +89,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.3.1-alpha"
+OPENSIFT_VERSION = "1.4.0-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
@@ -109,6 +122,22 @@ def _start_embedding_warmup_if_enabled() -> None:
             logger.exception("embedding_warmup_failed provider=local")
 
     threading.Thread(target=_run, name="opensift-embed-warmup", daemon=True).start()
+
+
+def _extract_text_from_image_bytes(data: bytes) -> str:
+    try:
+        from PIL import Image  # type: ignore
+        import pytesseract  # type: ignore
+    except Exception:
+        return ""
+    try:
+        import io
+
+        img = Image.open(io.BytesIO(data))
+        text = pytesseract.image_to_string(img, lang=os.getenv("OPENSIFT_OCR_LANG", "eng")) or ""
+        return text.strip()
+    except Exception:
+        return ""
 
 
 @asynccontextmanager
@@ -1104,6 +1133,7 @@ async def _print_startup_token():
     logger.info("study_library_dir=%s", STUDY_DIR)
     logger.info("quiz_attempts_dir=%s", QUIZ_DIR)
     logger.info("flashcards_dir=%s", FLASHCARD_DIR)
+    logger.info("sources_dir=%s", SOURCE_DIR)
 
 
 # -----------------------------------------------------------------------------
@@ -1506,6 +1536,22 @@ async def settings_page(request: Request, owner: str = "default"):
             "csrf_token": csrf_token,
             "token_hint": GEN_TOKEN[-6:],
             "has_password": _has_password(),
+        },
+    )
+    _set_csrf_cookie(response, request, csrf_token)
+    return response
+
+
+@app.get("/library", response_class=HTMLResponse)
+async def library_page(request: Request, owner: str = "default"):
+    owner = _normalize_owner(owner)
+    csrf_token = _csrf_token_for_request(request)
+    response = templates.TemplateResponse(
+        "library.html",
+        {
+            "request": request,
+            "owner": owner,
+            "csrf_token": csrf_token,
         },
     )
     _set_csrf_cookie(response, request, csrf_token)
@@ -1917,6 +1963,320 @@ async def flashcards_delete(owner: str = Form("default"), card_id: str = Form(..
     return JSONResponse({"ok": True, "owner": owner, "card_id": card_id})
 
 
+def _library_index_text(
+    owner: str,
+    kind: str,
+    title: str,
+    text: str,
+    url: str = "",
+    original_name: str = "",
+    binary_path: str = "",
+    source_id: str = "",
+    folder: str = "",
+    tags: str = "",
+) -> Dict[str, Any]:
+    owner = _normalize_owner(owner)
+    clean_text = (text or "").strip()
+    if not clean_text:
+        raise RuntimeError("No extractable text found for this source.")
+
+    source_id = (source_id or "").strip() or new_source_id()
+    prefix = f"{owner}::source::{source_id}"
+    chunks = chunk_text(clean_text, prefix=prefix)
+    if not chunks:
+        raise RuntimeError("No chunkable text extracted from source.")
+
+    texts = [c.text for c in chunks]
+    ids = [c.chunk_id for c in chunks]
+    metas = [
+        {
+            "source": title,
+            "source_id": source_id,
+            "kind": kind,
+            "owner": owner,
+            "url": url,
+            "original_name": original_name,
+            "start": c.start,
+            "end": c.end,
+        }
+        for c in chunks
+    ]
+
+    embs = embed_texts(texts)
+    db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+
+    text_path = write_source_text_blob(owner, source_id, clean_text, SOURCE_DIR)
+    item = {
+        "id": source_id,
+        "owner": owner,
+        "kind": kind,
+        "title": (title or "").strip() or f"Untitled {kind}",
+        "url": (url or "").strip(),
+        "original_name": (original_name or "").strip(),
+        "binary_path": (binary_path or "").strip(),
+        "text_path": text_path,
+        "preview": clean_text[:320],
+        "text_chars": len(clean_text),
+        "chunk_count": len(chunks),
+        "chunk_ids": ids,
+        "folder": (folder or "").strip(),
+        "tags": (tags or "").strip(),
+        "created_at": _now(),
+    }
+    add_source_item(owner, item, SOURCE_DIR)
+    return item
+
+
+# -----------------------------------------------------------------------------
+# Library endpoints (separate from chat UI, but shared retrieval DB)
+# -----------------------------------------------------------------------------
+@app.get("/chat/library/list")
+async def library_list(
+    owner: str = "default",
+    q: str = "",
+    kind: str = "",
+    folder: str = "",
+    tags: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+):
+    owner = _normalize_owner(owner)
+    items = load_source_items(owner, SOURCE_DIR)
+    qq = (q or "").strip().lower()
+    kk = (kind or "").strip().lower()
+    ff = (folder or "").strip().lower()
+    tt = [x.strip().lower() for x in (tags or "").split(",") if x.strip()]
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 20), 100))
+    sort_by = (sort_by or "created_at").strip().lower()
+    sort_dir = (sort_dir or "desc").strip().lower()
+
+    if qq:
+        items = [
+            x
+            for x in items
+            if qq in (str(x.get("title", "")).lower())
+            or qq in (str(x.get("preview", "")).lower())
+            or qq in (str(x.get("original_name", "")).lower())
+            or qq in (str(x.get("url", "")).lower())
+        ]
+    if kk:
+        items = [x for x in items if str(x.get("kind", "")).lower() == kk]
+    if ff:
+        items = [x for x in items if str(x.get("folder", "")).lower() == ff]
+    if tt:
+        def _item_tags(item: Dict[str, Any]) -> List[str]:
+            return [t.strip().lower() for t in str(item.get("tags", "")).split(",") if t.strip()]
+        items = [x for x in items if all(tag in _item_tags(x) for tag in tt)]
+
+    reverse = sort_dir != "asc"
+    if sort_by == "title":
+        items.sort(key=lambda x: str(x.get("title", "")).lower(), reverse=reverse)
+    elif sort_by == "kind":
+        items.sort(key=lambda x: str(x.get("kind", "")).lower(), reverse=reverse)
+    elif sort_by == "text_chars":
+        items.sort(key=lambda x: int(x.get("text_chars") or 0), reverse=reverse)
+    else:
+        items.sort(key=lambda x: str(x.get("created_at", "")), reverse=reverse)
+
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_items = items[start:end]
+    folders = sorted({str(x.get("folder", "")).strip() for x in items if str(x.get("folder", "")).strip()})
+    return JSONResponse(
+        {
+            "ok": True,
+            "owner": owner,
+            "items": page_items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
+            },
+            "folders": folders,
+        }
+    )
+
+
+@app.get("/chat/library/get")
+async def library_get(owner: str = "default", item_id: str = ""):
+    owner = _normalize_owner(owner)
+    item = get_source_item(owner, item_id, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    text = read_source_text_blob(str(item.get("text_path") or ""))
+    return JSONResponse({"ok": True, "owner": owner, "item": item, "text": text})
+
+
+@app.post("/chat/library/note")
+async def library_note(
+    owner: str = Form("default"),
+    title: str = Form(""),
+    note: str = Form(...),
+    folder: str = Form(""),
+    tags: str = Form(""),
+):
+    owner = _normalize_owner(owner)
+    text = (note or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "note_required"}, status_code=400)
+    item = await anyio.to_thread.run_sync(
+        lambda: _library_index_text(
+            owner,
+            "note",
+            title or "Quick Note",
+            text,
+            folder=folder,
+            tags=tags,
+        )
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/library/url")
+async def library_url(
+    owner: str = Form("default"),
+    url: str = Form(...),
+    title: str = Form(""),
+    folder: str = Form(""),
+    tags: str = Form(""),
+):
+    owner = _normalize_owner(owner)
+    raw_url = (url or "").strip()
+    if not raw_url:
+        return JSONResponse({"ok": False, "error": "url_required"}, status_code=400)
+    if "://" not in raw_url:
+        raw_url = f"https://{raw_url}"
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return JSONResponse({"ok": False, "error": "invalid_url"}, status_code=400)
+
+    page_title, text = await fetch_url_text(raw_url)
+    source_title = (title or "").strip() or page_title or raw_url
+    item = await anyio.to_thread.run_sync(
+        lambda: _library_index_text(
+            owner,
+            "url",
+            source_title,
+            text,
+            url=raw_url,
+            folder=folder,
+            tags=tags,
+        )
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/library/upload")
+async def library_upload(
+    owner: str = Form("default"),
+    title: str = Form(""),
+    folder: str = Form(""),
+    tags: str = Form(""),
+    file: UploadFile = File(...),
+):
+    owner = _normalize_owner(owner)
+    try:
+        data = await _read_upload_limited(file, MAX_UPLOAD_BYTES)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "file_too_large"}, status_code=413)
+
+    filename = (file.filename or "upload").strip() or "upload"
+    lower = filename.lower()
+    kind = "file"
+    text = ""
+    if lower.endswith(".pdf"):
+        kind = "pdf"
+        text = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf(data))
+    elif lower.endswith((".txt", ".md")):
+        kind = "text"
+        text = await anyio.to_thread.run_sync(lambda: extract_text_from_txt(data))
+    elif lower.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff", ".tif")):
+        kind = "image"
+        text = await anyio.to_thread.run_sync(lambda: _extract_text_from_image_bytes(data))
+    else:
+        return JSONResponse({"ok": False, "error": "unsupported_file_type"}, status_code=400)
+
+    if not (text or "").strip():
+        return JSONResponse({"ok": False, "error": "no_text_extracted"}, status_code=400)
+
+    source_id = new_source_id()
+    binary_path = write_source_binary_blob(owner, source_id, filename, data, SOURCE_DIR)
+    # Reuse ID for indexed source for easier file mapping.
+    item = await anyio.to_thread.run_sync(
+        lambda: _library_index_text(
+            owner=owner,
+            kind=kind,
+            title=(title or "").strip() or filename,
+            text=text,
+            original_name=filename,
+            binary_path=binary_path,
+            source_id=source_id,
+            folder=folder,
+            tags=tags,
+        )
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/library/delete")
+async def library_delete(owner: str = Form("default"), item_id: str = Form(...)):
+    owner = _normalize_owner(owner)
+    removed = delete_source_item(owner, item_id, SOURCE_DIR)
+    if not removed:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+
+    chunk_ids = [x for x in (removed.get("chunk_ids") or []) if isinstance(x, str)]
+    if chunk_ids:
+        try:
+            await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
+        except Exception:
+            logger.exception("library_delete_vector_chunks_failed owner=%s item_id=%s", owner, item_id)
+
+    remove_source_file(str(removed.get("binary_path") or ""))
+    remove_source_file(str(removed.get("text_path") or ""))
+    return JSONResponse({"ok": True, "owner": owner, "item_id": item_id})
+
+
+@app.post("/chat/library/update")
+async def library_update(
+    owner: str = Form("default"),
+    item_id: str = Form(...),
+    title: str = Form(""),
+    folder: str = Form(""),
+    tags: str = Form(""),
+):
+    owner = _normalize_owner(owner)
+    patch = {
+        "title": (title or "").strip(),
+        "folder": (folder or "").strip(),
+        "tags": (tags or "").strip(),
+    }
+    item = update_source_item(owner, item_id, patch, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.get("/chat/library/download")
+async def library_download(owner: str = "default", item_id: str = ""):
+    owner = _normalize_owner(owner)
+    item = get_source_item(owner, item_id, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+
+    binary_path = str(item.get("binary_path") or "").strip()
+    if not binary_path or not os.path.isfile(binary_path):
+        return JSONResponse({"ok": False, "error": "binary_not_available"}, status_code=404)
+
+    original_name = (item.get("original_name") or item.get("title") or "source.bin").strip()
+    return FileResponse(path=binary_path, filename=original_name)
+
+
 # -----------------------------------------------------------------------------
 # Ingest endpoints
 # -----------------------------------------------------------------------------
@@ -2099,6 +2459,7 @@ async def chat_stream(
     thinking_level: str = Form("medium"),
     show_thinking: bool = Form(True),
     true_streaming: bool = Form(True),
+    selected_library_ids: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     msg = (message or "").strip()
@@ -2130,7 +2491,7 @@ async def chat_stream(
     provider = resolved_provider
     model = resolved_model
     logger.info(
-        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s",
+        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s selected_library_ids=%s",
         owner,
         mode,
         provider,
@@ -2141,6 +2502,7 @@ async def chat_stream(
         thinking_level,
         show_thinking,
         true_streaming,
+        bool((selected_library_ids or "").strip()),
     )
 
     async def gen() -> AsyncGenerator[bytes, None]:
@@ -2173,6 +2535,8 @@ async def chat_stream(
                 )
             if provider_note:
                 yield _ndjson({"type": "status", "text": provider_note})
+            if (selected_library_ids or "").strip():
+                yield _ndjson({"type": "status", "text": "Adding selected library items as pinned context…"})
 
         # Retrieve
         try:
@@ -2242,7 +2606,45 @@ async def chat_stream(
             except Exception:
                 pass
 
-        if not results:
+        selected_ids = [
+            x.strip()
+            for x in (selected_library_ids or "").split(",")
+            if x.strip()
+        ][:8]
+        pinned_passages: List[Dict[str, Any]] = []
+        pinned_sources: List[Dict[str, Any]] = []
+        if selected_ids:
+            for sid in selected_ids:
+                item = get_source_item(owner, sid, SOURCE_DIR)
+                if not item:
+                    continue
+                text = read_source_text_blob(str(item.get("text_path") or ""))
+                text = (text or "").strip()
+                if not text:
+                    continue
+                pinned_passages.append(
+                    {
+                        "text": text[:4000],
+                        "meta": {
+                            "source": item.get("title") or item.get("original_name") or sid,
+                            "kind": "library_selected",
+                            "owner": owner,
+                            "source_id": sid,
+                            "url": item.get("url") or "",
+                        },
+                    }
+                )
+                pinned_sources.append(
+                    {
+                        "source": item.get("title") or item.get("original_name") or sid,
+                        "kind": "library_selected",
+                        "url": item.get("url") or "",
+                        "distance": None,
+                        "preview": text[:240],
+                    }
+                )
+
+        if not results and not pinned_passages:
             logger.info(
                 "chat_stream_no_results owner=%s k=%d duration_ms=%.2f",
                 owner,
@@ -2278,6 +2680,7 @@ async def chat_stream(
             }
             for r in results[:5]
         ]
+        sources_payload.extend(pinned_sources[:5])
         yield _ndjson({"type": "sources", "sources": sources_payload})
 
         # History-aware prompt
@@ -2290,7 +2693,8 @@ async def chat_stream(
             logger.exception("chat_stream_style_load_failed owner=%s", owner)
             study_style = ""
         logger.info("chat_stream_style owner=%s style_chars=%d", owner, len(study_style))
-        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages, study_style=study_style)
+        all_passages = pinned_passages + passages
+        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=all_passages, study_style=study_style)
 
         if show_thinking:
             thinking_label = "Thinking…"

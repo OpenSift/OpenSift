@@ -63,6 +63,26 @@ def test_chat_page_has_ingest_controls(monkeypatch) -> None:
     assert 'id="ingestOut"' in html
     assert 'id="ingestTitle"' in html
     assert 'id="ingestUrl"' in html
+    assert 'id="libraryBtn"' in html
+
+
+def test_library_page_has_expected_controls(monkeypatch) -> None:
+    client = _authed_client(monkeypatch)
+    resp = client.get("/library", params={"owner": "bio101"})
+    assert resp.status_code == 200
+
+    html = resp.text
+    assert "OpenSift Library" in html
+    assert 'id="goChatBtn"' in html
+    assert 'id="saveNoteBtn"' in html
+    assert 'id="saveUrlBtn"' in html
+    assert 'id="uploadBtn"' in html
+    assert 'id="uploadProgress"' in html
+    assert 'id="searchInput"' in html
+    assert 'id="kindFilter"' in html
+    assert 'id="listPane"' in html
+    assert 'id="detailsPanel"' in html
+    assert 'data-csrf="' in html
 
 
 def test_chat_stream_emits_provider_model_discrepancy_status(monkeypatch, tmp_path: Path) -> None:
