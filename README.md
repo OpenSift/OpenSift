@@ -214,6 +214,9 @@ http://127.0.0.1:8001/
 Useful Docker commands:
 
 ```bash
+
+touch backend/.env
+
 # Start in background
 docker compose up -d --build opensift-gateway
 
