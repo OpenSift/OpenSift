@@ -72,6 +72,7 @@ from source_store import (
     add_item as add_source_item,
     delete_item as delete_source_item,
     get_item as get_source_item,
+    list_owners as list_source_owners,
     load_items as load_source_items,
     new_source_id,
     read_text_blob as read_source_text_blob,
@@ -89,7 +90,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.4.0-alpha"
+OPENSIFT_VERSION = "1.5.0-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
@@ -1757,7 +1758,7 @@ async def session_new(owner: str = Form("default")):
 
 
 @app.post("/chat/session/delete")
-async def session_delete(owner: str = Form(...)):
+async def session_delete(owner: str = Form(...), delete_library_items: bool = Form(False)):
     owner = _normalize_owner(owner)
     if not owner:
         return JSONResponse({"ok": False, "error": "owner_required"}, status_code=400)
@@ -1765,7 +1766,35 @@ async def session_delete(owner: str = Form(...)):
     ok = delete_session(owner, SESSION_DIR)
     if not ok:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
-    return JSONResponse({"ok": True, "owner": owner})
+
+    deleted_library_count = 0
+    if delete_library_items:
+        items = load_source_items(owner, SOURCE_DIR)
+        for item in items:
+            item_id = str(item.get("id") or "").strip()
+            if not item_id:
+                continue
+            removed = delete_source_item(owner, item_id, SOURCE_DIR)
+            if not removed:
+                continue
+            chunk_ids = [x for x in (removed.get("chunk_ids") or []) if isinstance(x, str)]
+            if chunk_ids:
+                try:
+                    await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
+                except Exception:
+                    logger.exception("session_delete_vector_chunks_failed owner=%s item_id=%s", owner, item_id)
+            remove_source_file(str(removed.get("binary_path") or ""))
+            remove_source_file(str(removed.get("text_path") or ""))
+            deleted_library_count += 1
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "owner": owner,
+            "delete_library_items": bool(delete_library_items),
+            "deleted_library_count": deleted_library_count,
+        }
+    )
 
 
 @app.get("/chat/soul")
@@ -2033,6 +2062,7 @@ def _library_index_text(
 @app.get("/chat/library/list")
 async def library_list(
     owner: str = "default",
+    all_owners: bool = False,
     q: str = "",
     kind: str = "",
     folder: str = "",
@@ -2043,7 +2073,22 @@ async def library_list(
     sort_dir: str = "desc",
 ):
     owner = _normalize_owner(owner)
-    items = load_source_items(owner, SOURCE_DIR)
+    owners: List[str]
+    if all_owners:
+        owners = list_source_owners(SOURCE_DIR)
+    else:
+        owners = [owner]
+
+    items: List[Dict[str, Any]] = []
+    for own in owners:
+        own_items = load_source_items(own, SOURCE_DIR)
+        for item in own_items:
+            if not isinstance(item, dict):
+                continue
+            if not item.get("owner"):
+                item = dict(item)
+                item["owner"] = own
+            items.append(item)
     qq = (q or "").strip().lower()
     kk = (kind or "").strip().lower()
     ff = (folder or "").strip().lower()
@@ -2086,10 +2131,12 @@ async def library_list(
     end = start + page_size
     page_items = items[start:end]
     folders = sorted({str(x.get("folder", "")).strip() for x in items if str(x.get("folder", "")).strip()})
+    all_owner_names = sorted({str(x.get("owner", "")).strip() for x in items if str(x.get("owner", "")).strip()})
     return JSONResponse(
         {
             "ok": True,
             "owner": owner,
+            "all_owners": all_owners,
             "items": page_items,
             "pagination": {
                 "page": page,
@@ -2098,17 +2145,22 @@ async def library_list(
                 "total_pages": max(1, (total + page_size - 1) // page_size),
             },
             "folders": folders,
+            "owners": all_owner_names,
         }
     )
 
 
 @app.get("/chat/library/get")
-async def library_get(owner: str = "default", item_id: str = ""):
+async def library_get(owner: str = "default", item_owner: str = "", item_id: str = ""):
     owner = _normalize_owner(owner)
-    item = get_source_item(owner, item_id, SOURCE_DIR)
+    effective_owner = _normalize_owner(item_owner or owner)
+    item = get_source_item(effective_owner, item_id, SOURCE_DIR)
     if not item:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
     text = read_source_text_blob(str(item.get("text_path") or ""))
+    if not item.get("owner"):
+        item = dict(item)
+        item["owner"] = effective_owner
     return JSONResponse({"ok": True, "owner": owner, "item": item, "text": text})
 
 
@@ -2224,9 +2276,10 @@ async def library_upload(
 
 
 @app.post("/chat/library/delete")
-async def library_delete(owner: str = Form("default"), item_id: str = Form(...)):
+async def library_delete(owner: str = Form("default"), item_owner: str = Form(""), item_id: str = Form(...)):
     owner = _normalize_owner(owner)
-    removed = delete_source_item(owner, item_id, SOURCE_DIR)
+    effective_owner = _normalize_owner(item_owner or owner)
+    removed = delete_source_item(effective_owner, item_id, SOURCE_DIR)
     if not removed:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
 
@@ -2235,37 +2288,43 @@ async def library_delete(owner: str = Form("default"), item_id: str = Form(...))
         try:
             await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
         except Exception:
-            logger.exception("library_delete_vector_chunks_failed owner=%s item_id=%s", owner, item_id)
+            logger.exception("library_delete_vector_chunks_failed owner=%s item_id=%s", effective_owner, item_id)
 
     remove_source_file(str(removed.get("binary_path") or ""))
     remove_source_file(str(removed.get("text_path") or ""))
-    return JSONResponse({"ok": True, "owner": owner, "item_id": item_id})
+    return JSONResponse({"ok": True, "owner": effective_owner, "item_id": item_id})
 
 
 @app.post("/chat/library/update")
 async def library_update(
     owner: str = Form("default"),
+    item_owner: str = Form(""),
     item_id: str = Form(...),
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
 ):
     owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
     patch = {
         "title": (title or "").strip(),
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
     }
-    item = update_source_item(owner, item_id, patch, SOURCE_DIR)
+    item = update_source_item(effective_owner, item_id, patch, SOURCE_DIR)
     if not item:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
-    return JSONResponse({"ok": True, "owner": owner, "item": item})
+    if not item.get("owner"):
+        item = dict(item)
+        item["owner"] = effective_owner
+    return JSONResponse({"ok": True, "owner": effective_owner, "item": item})
 
 
 @app.get("/chat/library/download")
-async def library_download(owner: str = "default", item_id: str = ""):
+async def library_download(owner: str = "default", item_owner: str = "", item_id: str = ""):
     owner = _normalize_owner(owner)
-    item = get_source_item(owner, item_id, SOURCE_DIR)
+    effective_owner = _normalize_owner(item_owner or owner)
+    item = get_source_item(effective_owner, item_id, SOURCE_DIR)
     if not item:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
 
@@ -2275,6 +2334,32 @@ async def library_download(owner: str = "default", item_id: str = ""):
 
     original_name = (item.get("original_name") or item.get("title") or "source.bin").strip()
     return FileResponse(path=binary_path, filename=original_name)
+
+
+@app.get("/chat/library/preview")
+async def library_preview(owner: str = "default", item_owner: str = "", item_id: str = ""):
+    owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
+    item = get_source_item(effective_owner, item_id, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+
+    binary_path = str(item.get("binary_path") or "").strip()
+    if not binary_path or not os.path.isfile(binary_path):
+        return JSONResponse({"ok": False, "error": "binary_not_available"}, status_code=404)
+
+    kind = str(item.get("kind") or "").strip().lower()
+    original_name = (item.get("original_name") or item.get("title") or "source.pdf").strip()
+    file_ext = os.path.splitext(binary_path)[1].lower()
+    name_ext = os.path.splitext(original_name)[1].lower()
+    if kind != "pdf" and file_ext != ".pdf" and name_ext != ".pdf":
+        return JSONResponse({"ok": False, "error": "preview_not_supported_for_kind"}, status_code=400)
+
+    return FileResponse(
+        path=binary_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{original_name}"'},
+    )
 
 
 # -----------------------------------------------------------------------------

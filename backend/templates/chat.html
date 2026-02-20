@@ -6,75 +6,81 @@
     <title>OpenSift Chat</title>
     <style>
       :root {
-        --bg: #0b1020;
-        --panel: #121a30;
-        --panel-2: #16223d;
-        --text: #e9eefc;
-        --muted: #97a6c9;
-        --line: rgba(255, 255, 255, 0.12);
-        --brand: #4f74ff;
-        --danger: #c85b5b;
+        --bg: #f3f5f8;
+        --panel: #ffffff;
+        --panel-2: #f7f8fb;
+        --text: #151a22;
+        --muted: #6c7586;
+        --line: #e4e8ef;
+        --brand: #5aa8ff;
+        --brand-soft: #eaf4ff;
+        --danger: #c13737;
       }
       * { box-sizing: border-box; }
-      html, body { height: 100%; }
+      html, body { height: 100%; overflow: hidden; }
       body {
         margin: 0;
         color: var(--text);
-        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+        font-family: "Manrope", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
         background:
-          radial-gradient(1200px 700px at -20% -25%, #2b3f84 0%, transparent 56%),
-          radial-gradient(900px 540px at 130% -10%, #20416b 0%, transparent 58%),
-          linear-gradient(180deg, #080c16 0%, #0b1020 100%);
+          radial-gradient(900px 500px at -15% -20%, #e8f3ff 0%, transparent 60%),
+          radial-gradient(850px 500px at 120% -10%, #e6eefc 0%, transparent 58%),
+          linear-gradient(180deg, #f6f8fb 0%, #f1f4f8 100%);
       }
       .app {
-        height: 100vh;
+        height: 100dvh;
         display: grid;
-        grid-template-columns: 320px 1fr;
+        grid-template-columns: 300px 1fr;
+        gap: 0;
+        overflow: hidden;
       }
       .sidebar {
         border-right: 1px solid var(--line);
-        background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+        background: linear-gradient(180deg, #fdfdfe, #f7f9fc);
         display: grid;
         grid-template-rows: auto auto auto 1fr auto;
         min-height: 0;
+        overflow: hidden;
       }
       .section {
-        padding: 12px 14px;
+        padding: 12px;
         border-bottom: 1px solid var(--line);
       }
       .brand {
-        font-size: 18px;
-        font-weight: 650;
+        font-size: 17px;
+        font-weight: 760;
+        letter-spacing: .02em;
       }
       .newchat-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-      .history-wrap { min-height: 0; overflow: auto; padding: 10px; }
+      .history-wrap { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px; }
       .history-list { display: grid; gap: 8px; }
       .ingest-stack { display: grid; gap: 8px; }
       .flashcards-stack { display: grid; gap: 8px; }
       .library-stack { display: grid; gap: 8px; }
       .out {
-        border: 1px dashed var(--line);
+        border: 1px solid var(--line);
         border-radius: 10px;
-        padding: 8px;
+        padding: 9px;
         white-space: pre-wrap;
         font-size: 12px;
-        background: rgba(0,0,0,.15);
+        background: var(--panel);
         color: var(--muted);
       }
       .session-item {
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: 10px;
         padding: 10px;
-        background: rgba(255,255,255,.02);
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
       }
       .session-item-title { font-size: 13px; font-weight: 600; }
       .session-item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
       .session-item-actions { margin-top: 8px; display: flex; gap: 6px; }
       .fc-card {
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: 10px;
         padding: 10px;
-        background: rgba(255,255,255,.02);
+        background: var(--panel);
       }
       .fc-front { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
       .fc-back {
@@ -94,14 +100,15 @@
         padding: 6px 8px;
         font-size: 11px;
       }
-      .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+      .main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
       .topbar {
         border-bottom: 1px solid var(--line);
-        padding: 10px 14px;
+        padding: 10px 16px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
+        background: var(--panel);
       }
       .pill {
         font-size: 11px;
@@ -109,28 +116,34 @@
         border-radius: 999px;
         padding: 6px 10px;
         color: var(--muted);
+        background: #fff;
       }
-      .chat-zone { min-height: 0; display: grid; grid-template-rows: 1fr auto; }
-      .chat-scroll { min-height: 0; overflow: auto; padding: 16px 22px 8px; }
+      .chat-zone { min-height: 0; overflow: hidden; display: grid; grid-template-rows: 1fr auto; }
+      .chat-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 22px 10px; }
       .msg { display: flex; margin: 10px 0; }
       .msg.user { justify-content: flex-end; }
       .bubble {
-        max-width: min(860px, 82%);
-        border: 1px solid transparent;
-        border-radius: 14px;
-        padding: 11px 13px;
+        max-width: min(980px, 86%);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 13px;
         white-space: pre-wrap;
         word-break: break-word;
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, .05);
       }
-      .user .bubble { background: linear-gradient(180deg, #5a76ff, #4564ff); color: #fff; }
-      .assistant .bubble { background: var(--panel); border-color: var(--line); }
+      .user .bubble {
+        background: linear-gradient(180deg, #f1f8ff, #e7f3ff);
+        border-color: #cde5ff;
+      }
+      .assistant .bubble { background: var(--panel); }
       .meta { margin-top: 7px; font-size: 11px; color: var(--muted); }
       .composer {
         border-top: 1px solid var(--line);
         padding: 12px 14px;
         display: grid;
         gap: 9px;
-        background: rgba(10,15,26,.94);
+        background: linear-gradient(180deg, #fafbfd, #f5f7fb);
       }
       .controls { display: grid; grid-template-columns: 1fr 1fr .7fr 1.2fr 120px; gap: 8px; }
       .toggle-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -141,28 +154,37 @@
       }
       input, select, textarea {
         width: 100%;
-        color: var(--text);
+        color: #1e2430;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.04);
+        background: #fff;
         padding: 9px 10px;
       }
       textarea { min-height: 64px; resize: vertical; }
       button {
-        color: var(--text);
+        color: #1b2230;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.05);
+        background: #fff;
         padding: 9px 10px;
         cursor: pointer;
       }
-      button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
-      button.danger { background: rgba(200, 91, 91, .2); border-color: rgba(200, 91, 91, .4); }
+      button:hover { background: #f8fafc; }
+      button.primary {
+        background: linear-gradient(180deg, #68b2ff, #4f9dff);
+        border-color: #438fe7;
+        color: #fff;
+      }
+      button.danger {
+        background: #fff1f1;
+        border-color: #efb2b2;
+        color: #9f2626;
+      }
       .hint { font-size: 11px; color: var(--muted); }
       .modal-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.55);
+        background: rgba(18, 24, 38, 0.35);
         display: none;
         align-items: center;
         justify-content: center;
@@ -187,7 +209,7 @@
         border: 1px solid var(--line);
         border-radius: 12px;
         padding: 10px;
-        background: rgba(255,255,255,.02);
+        background: var(--panel-2);
       }
       .preview-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
       .preview-head input { width: auto; }
@@ -200,7 +222,7 @@
         color: var(--text);
         border: 1px solid var(--line);
         border-radius: 8px;
-        background: rgba(255,255,255,.04);
+        background: #fff;
         padding: 7px 8px;
         font-size: 12px;
       }
@@ -217,7 +239,10 @@
   <body data-csrf="{{ csrf_token }}">
     <div class="app">
       <aside class="sidebar">
-        <div class="section"><div class="brand">OpenSift Chat</div></div>
+        <div class="section">
+          <div class="brand">OpenSift</div>
+          <div class="hint" style="margin-top:2px;">Gateway</div>
+        </div>
 
         <div class="section" style="display:flex; gap:8px;">
           <button id="refreshHistoryBtn" type="button" style="width:100%;">Refresh</button>
@@ -508,6 +533,11 @@
         const textNode = document.createElement("div");
         textNode.textContent = text || "";
         bubble.appendChild(textNode);
+        const refsWrap = document.createElement("div");
+        refsWrap.className = "hint";
+        refsWrap.style.marginTop = "8px";
+        refsWrap.style.display = "none";
+        bubble.appendChild(refsWrap);
         const meta = document.createElement("div");
         meta.className = "meta";
         meta.textContent = ts || "";
@@ -515,7 +545,48 @@
         row.appendChild(bubble);
         chat.appendChild(row);
         scrollToBottom();
-        return { textEl: textNode, bubbleEl: bubble };
+        return { textEl: textNode, bubbleEl: bubble, refsEl: refsWrap };
+      }
+
+      function renderReferences(containerEl, sources) {
+        if (!containerEl) return;
+        containerEl.innerHTML = "";
+        const rows = Array.isArray(sources) ? sources : [];
+        if (!rows.length) {
+          containerEl.style.display = "none";
+          return;
+        }
+        containerEl.style.display = "block";
+        const title = document.createElement("div");
+        title.textContent = "References";
+        title.style.fontWeight = "600";
+        title.style.marginBottom = "4px";
+        containerEl.appendChild(title);
+
+        for (let i = 0; i < rows.length; i++) {
+          const src = rows[i] || {};
+          const line = document.createElement("div");
+          line.style.marginBottom = "2px";
+          const label = document.createElement("span");
+          const sourceName = (src.source || "source").toString();
+          const kind = (src.kind || "").toString();
+          const dist = src.distance === null || src.distance === undefined ? "" : ` · score ${Number(src.distance).toFixed(3)}`;
+          label.textContent = `[${i + 1}] ${sourceName}${kind ? ` (${kind})` : ""}${dist}`;
+          line.appendChild(label);
+          const url = (src.url || "").toString().trim();
+          if (url) {
+            const sep = document.createElement("span");
+            sep.textContent = " — ";
+            line.appendChild(sep);
+            const a = document.createElement("a");
+            a.href = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = "open";
+            line.appendChild(a);
+          }
+          containerEl.appendChild(line);
+        }
       }
 
       function normalizeProviderAndModel(provider, model) {
@@ -543,7 +614,12 @@
 
       function renderHistory(messages) {
         chat.innerHTML = "";
-        for (const m of messages || []) addBubble(m.role || "assistant", m.text || "", m.ts || "");
+        for (const m of messages || []) {
+          const b = addBubble(m.role || "assistant", m.text || "", m.ts || "");
+          if ((m.role || "") === "assistant") {
+            renderReferences(b.refsEl, m.sources || []);
+          }
+        }
       }
 
       async function sendStream() {
@@ -557,6 +633,7 @@
         setBusy(true);
 
         const a = addBubble("assistant", "", new Date().toISOString());
+        let latestSources = [];
         const statusEl = document.createElement("div");
         statusEl.className = "hint";
         statusEl.style.marginBottom = "6px";
@@ -625,6 +702,10 @@
               let evt;
               try { evt = JSON.parse(line); } catch { continue; }
               if (evt.type === "delta") a.textEl.textContent += (evt.text || "");
+              if (evt.type === "sources") {
+                latestSources = Array.isArray(evt.sources) ? evt.sources : [];
+                renderReferences(a.refsEl, latestSources);
+              }
               if (evt.type === "status" && showThinkingEl.checked) {
                 statusEl.textContent = evt.text || "";
                 pushStatus(evt.text || "");
@@ -835,10 +916,28 @@
       }
 
       async function deleteSessionByOwner(ownerName) {
+        const reallyDelete = confirm(
+          `Delete chat '${ownerName}'?\n\nYou can choose whether to also delete linked library items in the next step.`
+        );
+        if (!reallyDelete) return;
+
+        const deleteLinkedLibrary = confirm(
+          `Also delete library items linked to '${ownerName}'?\n\nOK = delete linked library items\nCancel = keep library items`
+        );
+
         const form = new FormData();
         form.append("owner", ownerName);
+        form.append("delete_library_items", deleteLinkedLibrary ? "true" : "false");
         const res = await csrfFetch("/chat/session/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (deleteLinkedLibrary) {
+          const n = Number(data.deleted_library_count || 0);
+          ingestOutEl.textContent = `Deleted chat '${ownerName}' and ${n} linked library item(s).`;
+        } else {
+          ingestOutEl.textContent = `Deleted chat '${ownerName}'. Linked library items were kept.`;
+        }
         if (owner() === ownerName) chat.innerHTML = "";
         await loadSessions();
       }

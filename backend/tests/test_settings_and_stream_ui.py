@@ -64,6 +64,8 @@ def test_chat_page_has_ingest_controls(monkeypatch) -> None:
     assert 'id="ingestTitle"' in html
     assert 'id="ingestUrl"' in html
     assert 'id="libraryBtn"' in html
+    assert 'evt.type === "sources"' in html
+    assert "References" in html
 
 
 def test_library_page_has_expected_controls(monkeypatch) -> None:
@@ -74,6 +76,7 @@ def test_library_page_has_expected_controls(monkeypatch) -> None:
     html = resp.text
     assert "OpenSift Library" in html
     assert 'id="goChatBtn"' in html
+    assert 'id="allOwnersToggle"' in html
     assert 'id="saveNoteBtn"' in html
     assert 'id="saveUrlBtn"' in html
     assert 'id="uploadBtn"' in html

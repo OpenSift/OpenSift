@@ -1,5 +1,62 @@
 # OpenSift Release Notes
 
+## v1.5.0-alpha
+Release date: 2026-02-20
+
+This release focuses on a full UI polish pass and significant improvements to Library and chat interoperability, including global browsing, references visibility, and safer chat/library lifecycle behavior.
+
+### Highlights
+- Refreshed UI design system across chat, settings, library, and login:
+  - consistent light dashboard style
+  - unified card/input/button visual language
+  - OpenSift light-blue accent theme
+- Library is now globally browsable across owners from one place.
+- Chat now visibly renders retrieved/pinned source references in responses.
+- Chat deletion flow now supports keeping or deleting linked library items.
+- Library "Ask From Chat" now reopens or creates the correct owner chat automatically.
+
+### Added
+- Global library browsing:
+  - `all_owners` support in `GET /chat/library/list`
+  - owner-aware operations for:
+    - `GET /chat/library/get`
+    - `GET /chat/library/download`
+    - `GET /chat/library/preview`
+    - `POST /chat/library/update`
+    - `POST /chat/library/delete`
+- New owner enumeration helper:
+  - `list_owners()` in `backend/source_store.py`
+- Explicit source references UI in chat:
+  - rendered from stream `sources` events and persisted history payloads
+- PDF preview resilience:
+  - preview endpoint accepts legacy PDF entries by file extension/name even when kind metadata is older
+  - browser fallback copy includes Safari Lockdown Mode guidance
+
+### Changed
+- Chat UX:
+  - deleting a chat now prompts whether to also delete linked library items
+  - backend `POST /chat/session/delete` accepts `delete_library_items` and returns `deleted_library_count`
+- Library UX:
+  - "Browse all owners" toggle in UI
+  - item cards and details include owner context
+  - "Ask From Chat" routes to the item owner and ensures a chat session exists
+- UI identity text updated from "Gateway Dashboard" to "Gateway" across templates.
+
+### Testing
+- Added/expanded tests in:
+  - `backend/tests/test_library_features.py`
+    - all-owners list behavior
+    - session-delete linked-library behavior
+    - PDF preview compatibility path
+  - `backend/tests/test_settings_and_stream_ui.py`
+    - continued UI control coverage for updated templates
+- Latest suite status during this release cycle: 63 passing tests (Docker).
+
+### Versioning
+- Bumped app version to `1.5.0-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
 ## v1.4.0-alpha
 Release date: 2026-02-19
 

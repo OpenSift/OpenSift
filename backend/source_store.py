@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import threading
+from glob import glob
 from typing import Any, Dict, List, Optional
 
 from app.atomic_io import atomic_write_json, path_lock
@@ -31,6 +32,19 @@ def _owner_files_dir(owner: str, base_dir: str = DEFAULT_DIR) -> str:
 
 def new_source_id() -> str:
     return secrets.token_urlsafe(9)
+
+
+def list_owners(base_dir: str = DEFAULT_DIR) -> List[str]:
+    os.makedirs(base_dir, exist_ok=True)
+    out: List[str] = []
+    for path in glob(os.path.join(base_dir, "*.json")):
+        name = os.path.basename(path)
+        if not name.endswith(".json"):
+            continue
+        owner = name[: -len(".json")].strip()
+        if owner:
+            out.append(owner)
+    return sorted(set(out))
 
 
 def load_items(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:

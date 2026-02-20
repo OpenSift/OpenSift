@@ -6,25 +6,25 @@
     <title>OpenSift Library</title>
     <style>
       :root {
-        --bg: #0b1020;
-        --panel: #121a30;
-        --panel-2: #172542;
-        --text: #e9eefc;
-        --muted: #97a6c9;
-        --line: rgba(255,255,255,.12);
-        --brand: #4f74ff;
-        --danger: #c85b5b;
+        --bg: #f3f5f8;
+        --panel: #ffffff;
+        --panel-2: #f7f8fb;
+        --text: #151a22;
+        --muted: #6c7586;
+        --line: #e4e8ef;
+        --brand: #5aa8ff;
+        --danger: #c13737;
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
       body {
         margin: 0;
         color: var(--text);
-        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+        font-family: "Manrope", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
         background:
-          radial-gradient(1200px 700px at -20% -25%, #2b3f84 0%, transparent 56%),
-          radial-gradient(900px 540px at 130% -10%, #20416b 0%, transparent 58%),
-          linear-gradient(180deg, #080c16 0%, #0b1020 100%);
+          radial-gradient(900px 500px at -15% -20%, #e8f3ff 0%, transparent 60%),
+          radial-gradient(850px 500px at 120% -10%, #e6eefc 0%, transparent 58%),
+          linear-gradient(180deg, #f6f8fb 0%, #f1f4f8 100%);
       }
       .app {
         height: 100vh;
@@ -33,7 +33,7 @@
       }
       .sidebar {
         border-right: 1px solid var(--line);
-        background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+        background: linear-gradient(180deg, #fdfdfe, #f7f9fc);
         display: grid;
         grid-template-rows: auto auto auto auto auto 1fr auto;
         min-height: 0;
@@ -42,7 +42,7 @@
         padding: 12px 14px;
         border-bottom: 1px solid var(--line);
       }
-      .brand { font-size: 18px; font-weight: 650; }
+      .brand { font-size: 17px; font-weight: 760; letter-spacing: .02em; }
       .stack { display: grid; gap: 8px; }
       .hint { font-size: 12px; color: var(--muted); }
       .main {
@@ -56,6 +56,7 @@
         display: flex;
         gap: 8px;
         align-items: center;
+        background: var(--panel);
       }
       .filters {
         border-bottom: 1px solid var(--line);
@@ -87,9 +88,10 @@
       }
       .item-card {
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: 10px;
         padding: 10px;
-        background: rgba(255,255,255,.03);
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
       }
       .item-title { font-weight: 600; font-size: 13px; }
       .item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
@@ -115,6 +117,7 @@
         border-radius: 12px;
         padding: 12px;
         background: var(--panel);
+        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
       }
       .panel h3 { margin: 0 0 8px; font-size: 16px; }
       .panel-meta { font-size: 12px; color: var(--muted); margin: 2px 0; }
@@ -123,41 +126,50 @@
         border: 1px solid var(--line);
         border-radius: 10px;
         padding: 10px;
-        background: rgba(0,0,0,.2);
+        background: var(--panel-2);
         white-space: pre-wrap;
         line-height: 1.4;
         max-height: 60vh;
         overflow: auto;
         font-size: 13px;
       }
+      .pdf-preview {
+        margin-top: 10px;
+        width: 100%;
+        height: min(72vh, 780px);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+      }
       input, select, textarea, button { font: inherit; }
       input, select, textarea {
         width: 100%;
-        color: var(--text);
+        color: #1e2430;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.04);
+        background: #fff;
         padding: 9px 10px;
       }
       textarea { min-height: 100px; resize: vertical; }
       button {
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.05);
-        color: var(--text);
+        background: #fff;
+        color: #1b2230;
         padding: 8px 10px;
         cursor: pointer;
       }
-      button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
-      button.danger { background: rgba(200,91,91,.2); border-color: rgba(200,91,91,.4); }
+      button:hover { background: #f8fafc; }
+      button.primary { background: linear-gradient(180deg, #68b2ff, #4f9dff); border-color: #438fe7; color: #fff; }
+      button.danger { background: #fff1f1; border-color: #efb2b2; color: #9f2626; }
       .out {
-        border: 1px dashed var(--line);
+        border: 1px solid var(--line);
         border-radius: 10px;
         padding: 9px;
         white-space: pre-wrap;
         font-size: 12px;
         color: var(--muted);
-        background: rgba(0,0,0,.15);
+        background: var(--panel-2);
       }
       .pill {
         font-size: 11px;
@@ -165,6 +177,7 @@
         border-radius: 999px;
         padding: 6px 10px;
         color: var(--muted);
+        background: #fff;
       }
       @media (max-width: 1100px) {
         .app { grid-template-columns: 1fr; }
@@ -176,11 +189,15 @@
   <body data-csrf="{{ csrf_token }}">
     <div class="app">
       <aside class="sidebar">
-        <div class="section"><div class="brand">OpenSift Library</div></div>
+        <div class="section">
+          <div class="brand">OpenSift</div>
+          <div class="hint" style="margin-top:2px;">Gateway</div>
+        </div>
 
         <div class="section stack">
           <div class="hint">Owner</div>
           <input id="owner" value="{{ owner }}" placeholder="bio101" />
+          <label class="hint"><input id="allOwnersToggle" type="checkbox" /> Browse all owners</label>
           <input id="defaultFolder" placeholder="Default folder (optional)" />
           <input id="defaultTags" placeholder="Default tags (comma-separated)" />
           <div style="display:flex; gap:8px;">
@@ -303,10 +320,12 @@
       const nextPageBtn = document.getElementById("nextPageBtn");
       const pageMetaEl = document.getElementById("pageMeta");
       const pageSizeEl = document.getElementById("pageSize");
+      const allOwnersToggleEl = document.getElementById("allOwnersToggle");
 
       let selectedItemId = "";
       let currentPage = 1;
       let totalPages = 1;
+      let libraryItemCache = {};
 
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -320,6 +339,28 @@
           return false;
         }
         return true;
+      }
+
+      async function openChatForOwner(ownerName) {
+        const targetOwner = (ownerName || "").trim() || owner();
+        try {
+          const listRes = await fetch("/chat/session/list");
+          if (await ensureAuth(listRes)) {
+            let exists = false;
+            if (listRes.ok) {
+              const listData = await listRes.json().catch(() => ({}));
+              const sessions = Array.isArray(listData.sessions) ? listData.sessions : [];
+              exists = sessions.some((s) => String((s || {}).owner || "") === targetOwner);
+            }
+            if (!exists) {
+              const form = new FormData();
+              form.append("owner", targetOwner);
+              const newRes = await csrfFetch("/chat/session/new", { method: "POST", body: form });
+              await ensureAuth(newRes);
+            }
+          }
+        } catch (_) {}
+        window.location.href = `/chat?owner=${encodeURIComponent(targetOwner)}`;
       }
 
       function owner() {
@@ -356,10 +397,11 @@
         const kind = kindFilterEl.value;
         const folder = folderFilterEl.value || "";
         const tags = tagsFilterEl.value.trim();
+        const allOwners = allOwnersToggleEl.checked ? "true" : "false";
         const sortBy = sortByEl.value || "created_at";
         const sortDir = sortDirEl.value || "desc";
         const pageSize = pageSizeEl.value || "20";
-        const u = `/chat/library/list?owner=${encodeURIComponent(o)}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&folder=${encodeURIComponent(folder)}&tags=${encodeURIComponent(tags)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&page=${encodeURIComponent(currentPage)}&page_size=${encodeURIComponent(pageSize)}`;
+        const u = `/chat/library/list?owner=${encodeURIComponent(o)}&all_owners=${encodeURIComponent(allOwners)}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&folder=${encodeURIComponent(folder)}&tags=${encodeURIComponent(tags)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&page=${encodeURIComponent(currentPage)}&page_size=${encodeURIComponent(pageSize)}`;
         const res = await fetch(u);
         if (!(await ensureAuth(res))) return;
         if (!res.ok) {
@@ -390,12 +432,14 @@
       }
 
       function renderItemList(items) {
+        libraryItemCache = {};
         listPaneEl.innerHTML = "";
         if (!items.length) {
           listPaneEl.innerHTML = `<div class="hint">No items yet. Add notes, URLs, PDFs, images, or text files.</div>`;
           return;
         }
         for (const item of items) {
+          libraryItemCache[item.id] = item;
           const isSelected = item.id === selectedItemId;
           const card = document.createElement("div");
           card.className = "item-card";
@@ -410,10 +454,12 @@
           const hasBinary = !!(item.binary_path || "");
           const folder = escapeHtml(item.folder || "");
           const tags = escapeHtml(item.tags || "");
+          const itemOwner = escapeHtml(item.owner || "");
 
           card.innerHTML = `
             <div class="item-title">${title}</div>
             <div class="item-meta">${kind} · ${textChars} chars · ${chunkCount} chunks</div>
+            <div class="item-meta">${itemOwner ? `owner: ${itemOwner}` : "owner: (unknown)"}</div>
             <div class="item-meta">${folder ? `folder: ${folder}` : "folder: (none)"}</div>
             <div class="item-meta">${tags ? `tags: ${tags}` : "tags: (none)"}</div>
             <div class="item-meta">${escapeHtml(created)}</div>
@@ -430,7 +476,7 @@
             card.querySelector('[data-action="download"]').addEventListener("click", () => {
               const o = owner();
               window.open(
-                `/chat/library/download?owner=${encodeURIComponent(o)}&item_id=${encodeURIComponent(item.id)}`,
+                `/chat/library/download?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(item.owner || o)}&item_id=${encodeURIComponent(item.id)}`,
                 "_blank"
               );
             });
@@ -448,25 +494,33 @@
       async function openItem(itemId) {
         selectedItemId = itemId;
         const o = owner();
-        const res = await fetch(`/chat/library/get?owner=${encodeURIComponent(o)}&item_id=${encodeURIComponent(itemId)}`);
+        const cachedItem = libraryItemCache[itemId];
+        const itemOwner = (cachedItem && cachedItem.owner) ? cachedItem.owner : o;
+        const res = await fetch(`/chat/library/get?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(itemId)}`);
         if (!(await ensureAuth(res))) return;
         if (!res.ok) {
           setOut("Failed to load selected item.");
           return;
         }
         const data = await res.json();
-        const item = data.item || {};
+        const detailItem = data.item || {};
         const text = data.text || "";
-        renderItemDetails(item, text);
+        renderItemDetails(detailItem, text);
         await loadLibraryList();
       }
 
       function renderItemDetails(item, text) {
         const hasBinary = !!(item.binary_path || "");
         const o = owner();
+        const itemOwner = String(item.owner || o);
+        const originalName = String(item.original_name || item.title || "").toLowerCase();
+        const binaryPath = String(item.binary_path || "").toLowerCase();
+        const isPdf = String(item.kind || "").toLowerCase() === "pdf" || originalName.endsWith(".pdf") || binaryPath.endsWith(".pdf");
+        const previewUrl = `/chat/library/preview?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}`;
         detailsPanelEl.innerHTML = `
           <h3>${escapeHtml(item.title || "Untitled")}</h3>
           <div class="panel-meta">Type: ${escapeHtml(item.kind || "")}</div>
+          <div class="panel-meta">Owner: ${escapeHtml(itemOwner || "")}</div>
           <div class="panel-meta">Created: ${escapeHtml(fmtTs(item.created_at))}</div>
           <div class="panel-meta">Source URL: ${escapeHtml(item.url || "")}</div>
           <div class="panel-meta">Filename: ${escapeHtml(item.original_name || "")}</div>
@@ -483,22 +537,35 @@
             ${hasBinary ? `<button id="detailsDownloadBtn" type="button">Download Original</button>` : ""}
             <button id="detailsToChatBtn" type="button" class="primary">Ask From Chat</button>
           </div>
+          ${isPdf && hasBinary ? `
+            <object class="pdf-preview" data="${previewUrl}" type="application/pdf">
+              <div class="hint" style="padding:12px;">
+                PDF preview is not available in this browser.
+                If you're using Safari with Lockdown Mode enabled, inline PDF previews can be blocked for this site.
+                <a href="${previewUrl}" target="_blank" rel="noopener noreferrer">Open with Preview</a>
+                or
+                <a href="/chat/library/download?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}" target="_blank" rel="noopener noreferrer">download it</a>.
+              </div>
+            </object>
+          ` : ""}
+          ${isPdf && hasBinary ? `<div class="hint" style="margin-top:8px;">PDF preview above. If the frame is blank, Safari Lockdown Mode may be blocking inline PDF rendering for this site. Use "Open with Preview" or disable Lockdown Mode for this site.</div>` : ""}
           <div class="panel-text">${escapeHtml(text || "(no text body found)")}</div>
         `;
         if (hasBinary) {
           document.getElementById("detailsDownloadBtn").addEventListener("click", () => {
             window.open(
-              `/chat/library/download?owner=${encodeURIComponent(o)}&item_id=${encodeURIComponent(item.id)}`,
+              `/chat/library/download?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id)}`,
               "_blank"
             );
           });
         }
         document.getElementById("detailsToChatBtn").addEventListener("click", () => {
-          window.location.href = `/chat?owner=${encodeURIComponent(o)}`;
+          openChatForOwner(itemOwner);
         });
         document.getElementById("saveMetaBtn").addEventListener("click", async () => {
           const form = new FormData();
           form.append("owner", o);
+          form.append("item_owner", itemOwner);
           form.append("item_id", item.id || "");
           form.append("title", (document.getElementById("editTitle").value || "").trim());
           form.append("folder", (document.getElementById("editFolder").value || "").trim());
@@ -516,8 +583,11 @@
       }
 
       async function deleteItem(itemId) {
+        const item = libraryItemCache[itemId];
+        const itemOwner = (item && item.owner) ? item.owner : owner();
         const form = new FormData();
         form.append("owner", owner());
+        form.append("item_owner", itemOwner);
         form.append("item_id", itemId);
         const res = await csrfFetch("/chat/library/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
@@ -671,6 +741,10 @@
         }
       });
       kindFilterEl.addEventListener("change", loadLibraryList);
+      allOwnersToggleEl.addEventListener("change", () => {
+        currentPage = 1;
+        loadLibraryList();
+      });
       folderFilterEl.addEventListener("change", loadLibraryList);
       tagsFilterEl.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
