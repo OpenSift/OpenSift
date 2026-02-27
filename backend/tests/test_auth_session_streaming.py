@@ -352,3 +352,19 @@ def test_chat_stream_emits_direct_streaming_status_for_openai(tmp_path: Path, mo
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
     assert any("Generation path: streaming via openai /" in s for s in statuses)
+
+
+def test_chat_stream_rejects_invalid_retrieval_mode(monkeypatch) -> None:
+    client = _authed_client(monkeypatch)
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "bad-mode",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "claude_code",
+            "retrieval_mode": "not_a_mode",
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json().get("error") == "invalid_retrieval_mode"
