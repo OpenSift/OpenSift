@@ -1202,82 +1202,174 @@ def _run_generate(
     thinking_enabled: bool = False,
     thinking_level: str = "medium",
 ) -> str:
+    return _run_generate_result(
+        provider,
+        prompt,
+        model,
+        thinking_enabled=thinking_enabled,
+        thinking_level=thinking_level,
+    )["text"]
+
+
+_ORIGINAL_RUN_GENERATE = _run_generate
+
+
+def _run_generate_result(
+    provider: str,
+    prompt: str,
+    model: str,
+    thinking_enabled: bool = False,
+    thinking_level: str = "medium",
+) -> Dict[str, Any]:
+    """
+    Structured generation contract for UI runtime and diagnostics.
+    Returns:
+      {
+        "text": str,
+        "provider_requested": str,
+        "provider_used": str,
+        "model_requested": str,
+        "model_used": str,
+        "fallback_used": bool,
+        "diagnostics": List[str],
+      }
+    """
+    provider_requested = (provider or "").strip().lower()
+    model_requested = (model or "").strip()
     provider, model, _note = _resolve_provider_model_pair(provider, model)
     provider = (provider or "").strip().lower()
     model = (model or "").strip()
 
+    diagnostics: List[str] = []
+
+    def _diag(msg: str) -> None:
+        diagnostics.append(msg)
+
+    def _success(text: str, provider_used: str, model_used: str) -> Dict[str, Any]:
+        return {
+            "text": text,
+            "provider_requested": provider_requested or provider,
+            "provider_used": provider_used,
+            "model_requested": model_requested or model,
+            "model_used": model_used,
+            "fallback_used": provider_used != provider or model_used != (model or model_used),
+            "diagnostics": diagnostics,
+        }
+
+    def _ensure_text(out: str, label: str) -> str:
+        text = (out or "").strip()
+        if not text:
+            raise RuntimeError(f"{label} returned empty output")
+        return text
+
+    def _try_openai(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(_ensure_text(generate_with_openai(prompt, model=m), "OpenAI"), "openai", m)
+        except Exception as e:
+            _diag(f"OpenAI failed: {e}")
+            return None
+
+    def _try_claude(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(
+                _ensure_text(
+                    generate_with_claude(
+                        prompt,
+                        model=m,
+                        thinking_enabled=thinking_enabled,
+                        thinking_level=thinking_level,
+                    ),
+                    "Claude API",
+                ),
+                "claude",
+                m,
+            )
+        except Exception as e:
+            _diag(f"Claude API failed: {e}")
+            return None
+
+    def _try_claude_code(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(_ensure_text(generate_with_claude_code(prompt, model=m), "Claude Code CLI"), "claude_code", m)
+        except Exception as e:
+            _diag(f"Claude Code CLI failed: {e}")
+            return None
+
+    def _try_codex(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(_ensure_text(generate_with_codex(prompt, model=m), "Codex CLI"), "codex", m)
+        except Exception as e:
+            _diag(f"Codex CLI failed: {e}")
+            return None
+
     if provider == "openai":
         m = model or DEFAULT_OPENAI_MODEL
-        return generate_with_openai(prompt, model=m)
+        out = _try_openai(m, "")
+        if out:
+            return out
+        raise RuntimeError("Generation failed for OpenAI. " + " | ".join(diagnostics[-6:]))
 
     if provider == "claude":
         m = model or DEFAULT_CLAUDE_MODEL
-        return generate_with_claude(
-            prompt,
-            model=m,
-            thinking_enabled=thinking_enabled,
-            thinking_level=thinking_level,
-        )
+        out = _try_claude(m, "")
+        if out:
+            return out
+        raise RuntimeError("Generation failed for Claude API. " + " | ".join(diagnostics[-6:]))
 
     if provider == "claude_code":
-        # Prefer Claude Code CLI; if unavailable and Anthropic API key exists, fallback to Claude API.
         m = model or DEFAULT_CLAUDE_MODEL
-        if not claude_code_cli_available():
-            if os.getenv("ANTHROPIC_API_KEY", "").strip():
-                logger.warning("claude_code_cli_unavailable_fallback_to_claude_api model=%s", m)
-                return generate_with_claude(
-                    prompt,
-                    model=m,
-                    thinking_enabled=thinking_enabled,
-                    thinking_level=thinking_level,
-                )
-            if codex_cli_available() and codex_auth_detected():
-                logger.warning("claude_code_cli_unavailable_fallback_to_codex model=%s", DEFAULT_CODEX_MODEL)
-                return generate_with_codex(prompt, model=DEFAULT_CODEX_MODEL)
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("claude_code_cli_unavailable_fallback_to_openai_api model=%s", DEFAULT_OPENAI_MODEL)
-                return generate_with_openai(prompt, model=DEFAULT_OPENAI_MODEL)
-            raise RuntimeError(
-                "Claude Code CLI not found and no fallback provider configured. "
-                "Install Claude Code or set OPENSIFT_CLAUDE_CODE_CMD, or configure ANTHROPIC_API_KEY/OPENAI_API_KEY."
-            )
-        try:
-            return generate_with_claude_code(prompt, model=m)
-        except Exception:
-            # Claude CLI can return success with no usable output in headless environments.
-            if os.getenv("ANTHROPIC_API_KEY", "").strip():
-                logger.warning("claude_code_generation_failed_fallback_to_claude_api model=%s", m)
-                return generate_with_claude(
-                    prompt,
-                    model=m,
-                    thinking_enabled=thinking_enabled,
-                    thinking_level=thinking_level,
-                )
-            if codex_cli_available() and codex_auth_detected():
-                logger.warning("claude_code_generation_failed_fallback_to_codex model=%s", DEFAULT_CODEX_MODEL)
-                return generate_with_codex(prompt, model=DEFAULT_CODEX_MODEL)
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("claude_code_generation_failed_fallback_to_openai_api model=%s", DEFAULT_OPENAI_MODEL)
-                return generate_with_openai(prompt, model=DEFAULT_OPENAI_MODEL)
-            raise
+        if claude_code_cli_available():
+            out = _try_claude_code(m, "")
+            if out:
+                return out
+        else:
+            _diag("Claude Code CLI unavailable.")
+
+        if os.getenv("ANTHROPIC_API_KEY", "").strip():
+            out = _try_claude(m, "Falling back from Claude Code CLI to Claude API.")
+            if out:
+                return out
+        if codex_cli_available() and codex_auth_detected():
+            out = _try_codex(DEFAULT_CODEX_MODEL, "Falling back from Claude Code CLI to Codex CLI.")
+            if out:
+                return out
+        if os.getenv("OPENAI_API_KEY", "").strip():
+            out = _try_openai(DEFAULT_OPENAI_MODEL, "Falling back from Claude Code CLI to OpenAI API.")
+            if out:
+                return out
+
+        raise RuntimeError(
+            "Generation failed for Claude Code path. "
+            "Install Claude Code or set OPENSIFT_CLAUDE_CODE_CMD, or configure ANTHROPIC_API_KEY/OPENAI_API_KEY. "
+            + " | ".join(diagnostics[-8:])
+        )
 
     if provider == "codex":
         m = model or DEFAULT_CODEX_MODEL
-        if not codex_cli_available():
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("codex_cli_unavailable_fallback_to_openai_api model=%s", m)
-                return generate_with_openai(prompt, model=m or DEFAULT_OPENAI_MODEL)
-            raise RuntimeError(
-                "Codex CLI not found and no OPENAI_API_KEY configured. "
-                "Install Codex CLI or set OPENSIFT_CODEX_CMD, or configure OpenAI API key."
-            )
-        try:
-            return generate_with_codex(prompt, model=m)
-        except Exception:
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("codex_generation_failed_fallback_to_openai_api model=%s", m)
-                return generate_with_openai(prompt, model=m or DEFAULT_OPENAI_MODEL)
-            raise
+        if codex_cli_available():
+            out = _try_codex(m, "")
+            if out:
+                return out
+        else:
+            _diag("Codex CLI unavailable.")
+
+        if os.getenv("OPENAI_API_KEY", "").strip():
+            out = _try_openai(m or DEFAULT_OPENAI_MODEL, "Falling back from Codex CLI to OpenAI API.")
+            if out:
+                return out
+        raise RuntimeError(
+            "Generation failed for Codex path. "
+            "Install Codex CLI or set OPENSIFT_CODEX_CMD, or configure OPENAI_API_KEY. "
+            + " | ".join(diagnostics[-8:])
+        )
 
     raise RuntimeError(f"Unknown provider: {provider}")
 
@@ -1290,14 +1382,50 @@ async def _run_generate_resilient(
     thinking_enabled: bool = False,
     thinking_level: str = "medium",
 ) -> str:
-    task: "asyncio.Task[str]" = asyncio.create_task(
+    return (await _run_generate_resilient_result(
+        request,
+        provider,
+        prompt,
+        model,
+        thinking_enabled=thinking_enabled,
+        thinking_level=thinking_level,
+    ))["text"]
+
+
+async def _run_generate_resilient_result(
+    request: Request,
+    provider: str,
+    prompt: str,
+    model: str,
+    thinking_enabled: bool = False,
+    thinking_level: str = "medium",
+) -> Dict[str, Any]:
+    task: "asyncio.Task[Dict[str, Any]]" = asyncio.create_task(
         anyio.to_thread.run_sync(
-            lambda: _run_generate(
-                provider,
-                prompt,
-                model,
-                thinking_enabled=thinking_enabled,
-                thinking_level=thinking_level,
+            lambda: (
+                _run_generate_result(
+                    provider,
+                    prompt,
+                    model,
+                    thinking_enabled=thinking_enabled,
+                    thinking_level=thinking_level,
+                )
+                if _run_generate is _ORIGINAL_RUN_GENERATE
+                else {
+                    "text": _run_generate(
+                        provider,
+                        prompt,
+                        model,
+                        thinking_enabled=thinking_enabled,
+                        thinking_level=thinking_level,
+                    ),
+                    "provider_requested": (provider or "").strip().lower(),
+                    "provider_used": (provider or "").strip().lower(),
+                    "model_requested": (model or "").strip(),
+                    "model_used": (model or "").strip(),
+                    "fallback_used": False,
+                    "diagnostics": [],
+                }
             ),
             abandon_on_cancel=False,
         )
