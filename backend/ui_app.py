@@ -2893,6 +2893,8 @@ async def chat_stream(
                         "source": item.get("title") or item.get("original_name") or sid,
                         "kind": "library_selected",
                         "url": item.get("url") or "",
+                        "source_id": sid,
+                        "owner": owner,
                         "distance": None,
                         "preview": text[:240],
                     }
@@ -2919,6 +2921,7 @@ async def chat_stream(
                 "text": assistant_text,
                 "ts": _now(),
                 "sources": [],
+                "citations": [],
                 "break_reminder": add_break,
             }
             _history_append(owner, assistant_msg)
@@ -2927,18 +2930,50 @@ async def chat_stream(
             yield _ndjson({"type": "done", "ts": _now()})
             return
 
-        sources_payload = [
-            {
-                "source": (r["meta"] or {}).get("source"),
-                "kind": (r["meta"] or {}).get("kind"),
-                "url": (r["meta"] or {}).get("url"),
-                "distance": r["distance"],
-                "preview": (r["text"] or "")[:240],
+        sources_payload = []
+        citations_payload = []
+        for idx, r in enumerate(results[:5], start=1):
+            meta = r.get("meta") or {}
+            source_item = {
+                "source": meta.get("source"),
+                "kind": meta.get("kind"),
+                "url": meta.get("url"),
+                "distance": r.get("distance"),
+                "preview": (r.get("text") or "")[:240],
+                "source_id": meta.get("source_id"),
+                "owner": meta.get("owner"),
             }
-            for r in results[:5]
-        ]
-        sources_payload.extend(pinned_sources[:5])
+            sources_payload.append(source_item)
+            citations_payload.append(
+                {
+                    "n": idx,
+                    "label": f"[{idx}]",
+                    "source": source_item.get("source"),
+                    "kind": source_item.get("kind"),
+                    "url": source_item.get("url"),
+                    "source_id": source_item.get("source_id"),
+                    "owner": source_item.get("owner"),
+                    "distance": source_item.get("distance"),
+                }
+            )
+        for src in pinned_sources[:5]:
+            next_n = len(citations_payload) + 1
+            item = dict(src)
+            sources_payload.append(item)
+            citations_payload.append(
+                {
+                    "n": next_n,
+                    "label": f"[{next_n}]",
+                    "source": item.get("source"),
+                    "kind": item.get("kind"),
+                    "url": item.get("url"),
+                    "source_id": item.get("source_id"),
+                    "owner": item.get("owner"),
+                    "distance": item.get("distance"),
+                }
+            )
         yield _ndjson({"type": "sources", "sources": sources_payload})
+        yield _ndjson({"type": "citations", "citations": citations_payload})
 
         # History-aware prompt
         history_before_response = _history_snapshot(owner)
@@ -3169,6 +3204,7 @@ async def chat_stream(
             "text": assistant_text,
             "ts": _now(),
             "sources": sources_payload,
+            "citations": citations_payload,
             "mode": mode,
             "provider": provider,
             "model": model,
