@@ -14,6 +14,12 @@ def _parse_level(raw: str) -> int:
     return getattr(logging, name, logging.INFO)
 
 
+def _is_truthy(raw: Optional[str], default: bool = False) -> bool:
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def configure_logging(
     service: str = "opensift",
     level: Optional[str] = None,
@@ -41,6 +47,19 @@ def configure_logging(
     root.setLevel(log_level)
     root.handlers.clear()
 
+    # Chroma 0.5.x may emit noisy telemetry error logs even when anonymized
+    # telemetry is disabled. Keep these suppressed by default; allow opt-in for
+    # troubleshooting via OPENSIFT_SUPPRESS_CHROMA_TELEMETRY_LOGS=false.
+    suppress_chroma_telemetry_logs = _is_truthy(
+        os.getenv("OPENSIFT_SUPPRESS_CHROMA_TELEMETRY_LOGS"),
+        default=True,
+    )
+    if suppress_chroma_telemetry_logs:
+        for logger_name in ("chromadb.telemetry.product.posthog",):
+            noisy_logger = logging.getLogger(logger_name)
+            noisy_logger.setLevel(logging.CRITICAL)
+            noisy_logger.propagate = False
+
     console = logging.StreamHandler()
     console.setLevel(log_level)
     console.setFormatter(fmt)
@@ -66,4 +85,3 @@ def configure_logging(
         backup_count,
     )
     return logger
-
