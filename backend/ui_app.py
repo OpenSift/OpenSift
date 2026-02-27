@@ -458,6 +458,7 @@ MAX_SESSION_IMPORT_CHARS = max(1024, int(os.getenv("OPENSIFT_MAX_SESSION_IMPORT_
 MAX_HISTORY_TURNS = max(1, int(os.getenv("OPENSIFT_MAX_HISTORY_TURNS", "30")))
 MAX_RETRIEVAL_K = max(1, int(os.getenv("OPENSIFT_MAX_RETRIEVAL_K", "20")))
 ALLOWED_RETRIEVAL_MODES = ("semantic_plus_pinned", "semantic_only", "pinned_only")
+ALLOWED_RETRIEVAL_DEPTHS = ("fast", "balanced", "deep")
 try:
     RETRIEVAL_TIMEOUT_SECONDS = max(5.0, float(os.getenv("OPENSIFT_RETRIEVAL_TIMEOUT_SECONDS", "300")))
 except Exception:
@@ -541,6 +542,23 @@ def _sanitize_retrieval_mode(retrieval_mode: str) -> str:
     if mode not in ALLOWED_RETRIEVAL_MODES:
         raise ValueError("invalid_retrieval_mode")
     return mode
+
+
+def _sanitize_retrieval_params(retrieval_mode: str, retrieval_depth: str) -> Tuple[str, str]:
+    mode = _sanitize_retrieval_mode(retrieval_mode)
+    depth = (retrieval_depth or "balanced").strip().lower()
+    if depth not in ALLOWED_RETRIEVAL_DEPTHS:
+        raise ValueError("invalid_retrieval_depth")
+    return mode, depth
+
+
+def _effective_retrieval_k(base_k: int, retrieval_depth: str) -> int:
+    depth = (retrieval_depth or "balanced").strip().lower()
+    if depth == "fast":
+        return max(1, min(base_k, MAX_RETRIEVAL_K))
+    if depth == "deep":
+        return max(1, min(base_k * 2, MAX_RETRIEVAL_K))
+    return max(1, min(int(base_k * 1.5), MAX_RETRIEVAL_K))
 
 
 def _preferred_provider_default() -> str:
@@ -2906,7 +2924,6 @@ async def chat_stream(
     show_thinking: bool = Form(True),
     true_streaming: bool = Form(True),
     selected_library_ids: str = Form(""),
-    retrieval_mode: str = Form("semantic_plus_pinned"),
     retrieval_depth: str = Form("balanced"),
 ):
     owner = _normalize_owner(owner)
@@ -2920,10 +2937,6 @@ async def chat_stream(
         )
     try:
         mode, provider, k, history_turns = _sanitize_post_params(mode, provider, k, history_turns)
-        retrieval_mode = _sanitize_retrieval_mode(retrieval_mode)
-    except ValueError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-    try:
         retrieval_mode, retrieval_depth = _sanitize_retrieval_params(retrieval_mode, retrieval_depth)
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
@@ -2945,16 +2958,15 @@ async def chat_stream(
     provider = resolved_provider
     model = resolved_model
     logger.info(
-        "chat_stream_start owner=%s mode=%s provider=%s model=%s retrieval_mode=%s k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s selected_library_ids=%s",
+        "chat_stream_start owner=%s mode=%s provider=%s model=%s retrieval_mode=%s retrieval_depth=%s k=%d effective_k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s selected_library_ids=%s",
         owner,
         mode,
         provider,
         model,
         retrieval_mode,
+        retrieval_depth,
         k,
         effective_k,
-        retrieval_mode,
-        retrieval_depth,
         history_enabled,
         thinking_enabled,
         thinking_level,
