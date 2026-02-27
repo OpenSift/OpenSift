@@ -65,6 +65,15 @@
         grid-template-columns: 1fr 160px 160px 180px 100px 100px 140px;
         gap: 8px;
       }
+      .batchbar {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 14px;
+        display: grid;
+        grid-template-columns: auto 180px 220px auto auto auto auto;
+        gap: 8px;
+        align-items: center;
+        background: #f8fbff;
+      }
       .pagination {
         border-top: 1px solid var(--line);
         padding: 8px 14px;
@@ -266,6 +275,15 @@
           </select>
           <button id="searchBtn" type="button">Search</button>
         </div>
+        <div class="batchbar">
+          <label class="hint"><input id="selectAllPage" type="checkbox" /> Select page</label>
+          <input id="batchMoveFolder" placeholder="Move selected to folder..." />
+          <input id="batchTagValue" placeholder="Set selected tags (comma-separated)" />
+          <button id="batchMoveBtn" type="button">Move</button>
+          <button id="batchTagBtn" type="button">Set Tags</button>
+          <button id="batchExportBtn" type="button">Export</button>
+          <button id="batchDeleteBtn" type="button" class="danger">Delete</button>
+        </div>
         <div class="content">
           <section id="listPane" class="list-pane"></section>
           <section class="details">
@@ -321,11 +339,19 @@
       const pageMetaEl = document.getElementById("pageMeta");
       const pageSizeEl = document.getElementById("pageSize");
       const allOwnersToggleEl = document.getElementById("allOwnersToggle");
+      const selectAllPageEl = document.getElementById("selectAllPage");
+      const batchMoveFolderEl = document.getElementById("batchMoveFolder");
+      const batchTagValueEl = document.getElementById("batchTagValue");
+      const batchMoveBtn = document.getElementById("batchMoveBtn");
+      const batchTagBtn = document.getElementById("batchTagBtn");
+      const batchExportBtn = document.getElementById("batchExportBtn");
+      const batchDeleteBtn = document.getElementById("batchDeleteBtn");
 
       let selectedItemId = "";
       let currentPage = 1;
       let totalPages = 1;
       let libraryItemCache = {};
+      let selectedItemIds = new Set();
 
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -373,6 +399,25 @@
 
       function setOut(text) {
         actionOutEl.textContent = text || "";
+      }
+
+      function selectedItems() {
+        const out = [];
+        for (const id of selectedItemIds) {
+          const item = libraryItemCache[id];
+          if (item) out.push(item);
+        }
+        return out;
+      }
+
+      function updateSelectionUI() {
+        const count = selectedItems().length;
+        if (count > 0) {
+          setOut(`${count} selected item(s).`);
+        }
+        const pageIds = Object.keys(libraryItemCache);
+        const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedItemIds.has(id));
+        selectAllPageEl.checked = allOnPageSelected;
       }
 
       function fmtTs(ts) {
@@ -432,15 +477,22 @@
       }
 
       function renderItemList(items) {
+        const pageIds = new Set((items || []).map((x) => String(x.id || "")));
+        for (const id of Array.from(selectedItemIds)) {
+          if (!pageIds.has(id)) selectedItemIds.delete(id);
+        }
         libraryItemCache = {};
         listPaneEl.innerHTML = "";
         if (!items.length) {
+          selectAllPageEl.checked = false;
           listPaneEl.innerHTML = `<div class="hint">No items yet. Add notes, URLs, PDFs, images, or text files.</div>`;
           return;
         }
         for (const item of items) {
-          libraryItemCache[item.id] = item;
+          const itemId = String(item.id || "");
+          libraryItemCache[itemId] = item;
           const isSelected = item.id === selectedItemId;
+          const isChecked = selectedItemIds.has(itemId);
           const card = document.createElement("div");
           card.className = "item-card";
           if (isSelected) card.style.borderColor = "#5a76ff";
@@ -457,9 +509,15 @@
           const itemOwner = escapeHtml(item.owner || "");
 
           card.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <label class="hint" style="display:inline-flex; align-items:center; gap:6px; margin:0;">
+                <input type="checkbox" data-action="select" ${isChecked ? "checked" : ""} />
+                select
+              </label>
+              <span class="hint">${itemOwner ? `owner: ${itemOwner}` : "owner: (unknown)"}</span>
+            </div>
             <div class="item-title">${title}</div>
             <div class="item-meta">${kind} · ${textChars} chars · ${chunkCount} chunks</div>
-            <div class="item-meta">${itemOwner ? `owner: ${itemOwner}` : "owner: (unknown)"}</div>
             <div class="item-meta">${folder ? `folder: ${folder}` : "folder: (none)"}</div>
             <div class="item-meta">${tags ? `tags: ${tags}` : "tags: (none)"}</div>
             <div class="item-meta">${escapeHtml(created)}</div>
@@ -471,6 +529,11 @@
             </div>
           `;
 
+          card.querySelector('[data-action="select"]').addEventListener("change", (ev) => {
+            if (ev.target.checked) selectedItemIds.add(itemId);
+            else selectedItemIds.delete(itemId);
+            updateSelectionUI();
+          });
           card.querySelector('[data-action="open"]').addEventListener("click", () => openItem(item.id));
           if (hasBinary) {
             card.querySelector('[data-action="download"]').addEventListener("click", () => {
@@ -489,6 +552,7 @@
 
           listPaneEl.appendChild(card);
         }
+        updateSelectionUI();
       }
 
       async function openItem(itemId) {
@@ -531,6 +595,14 @@
             <input id="editTitle" value="${escapeHtml(item.title || "")}" placeholder="Title" />
             <input id="editFolder" value="${escapeHtml(item.folder || "")}" placeholder="Folder" />
             <input id="editTags" value="${escapeHtml(item.tags || "")}" placeholder="Tags (comma-separated)" />
+            <input id="editCitationTitle" value="${escapeHtml(item.citation_title || "")}" placeholder="Citation title" />
+            <input id="editCitationAuthors" value="${escapeHtml(item.citation_authors || "")}" placeholder="Citation authors" />
+            <div style="display:grid; grid-template-columns: 140px 1fr; gap:8px;">
+              <input id="editCitationYear" value="${escapeHtml(item.citation_year || "")}" placeholder="Year" />
+              <input id="editCitationJournal" value="${escapeHtml(item.citation_journal || "")}" placeholder="Journal / Venue" />
+            </div>
+            <input id="editCitationDoi" value="${escapeHtml(item.citation_doi || "")}" placeholder="DOI" />
+            <input id="editCitationUrl" value="${escapeHtml(item.citation_url || "")}" placeholder="Citation URL" />
             <button id="saveMetaBtn" type="button">Save Metadata</button>
           </div>
           <div style="display:flex; gap:8px; margin-top:10px;">
@@ -570,6 +642,12 @@
           form.append("title", (document.getElementById("editTitle").value || "").trim());
           form.append("folder", (document.getElementById("editFolder").value || "").trim());
           form.append("tags", (document.getElementById("editTags").value || "").trim());
+          form.append("citation_title", (document.getElementById("editCitationTitle").value || "").trim());
+          form.append("citation_authors", (document.getElementById("editCitationAuthors").value || "").trim());
+          form.append("citation_year", (document.getElementById("editCitationYear").value || "").trim());
+          form.append("citation_journal", (document.getElementById("editCitationJournal").value || "").trim());
+          form.append("citation_doi", (document.getElementById("editCitationDoi").value || "").trim());
+          form.append("citation_url", (document.getElementById("editCitationUrl").value || "").trim());
           const res = await csrfFetch("/chat/library/update", { method: "POST", body: form });
           if (!(await ensureAuth(res))) return;
           const data = await res.json().catch(() => ({}));
@@ -605,6 +683,113 @@
         }
         setOut("Deleted item.");
         await loadLibraryList();
+      }
+
+      async function batchUpdateSelected({ folder = null, tags = null }) {
+        const items = selectedItems();
+        if (!items.length) {
+          setOut("Select one or more items first.");
+          return;
+        }
+        let ok = 0;
+        let failed = 0;
+        for (const item of items) {
+          const form = new FormData();
+          form.append("owner", owner());
+          form.append("item_owner", String(item.owner || owner()));
+          form.append("item_id", String(item.id || ""));
+          form.append("title", String(item.title || "").trim());
+          form.append("folder", folder === null ? String(item.folder || "") : String(folder));
+          form.append("tags", tags === null ? String(item.tags || "") : String(tags));
+          form.append("citation_title", String(item.citation_title || ""));
+          form.append("citation_authors", String(item.citation_authors || ""));
+          form.append("citation_year", String(item.citation_year || ""));
+          form.append("citation_journal", String(item.citation_journal || ""));
+          form.append("citation_doi", String(item.citation_doi || ""));
+          form.append("citation_url", String(item.citation_url || ""));
+          const res = await csrfFetch("/chat/library/update", { method: "POST", body: form });
+          if (!(await ensureAuth(res))) return;
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.ok) ok += 1;
+          else failed += 1;
+        }
+        setOut(`Batch update complete. Updated: ${ok}, failed: ${failed}.`);
+        await loadLibraryList();
+        if (selectedItemId) await openItem(selectedItemId);
+      }
+
+      async function batchDeleteSelected() {
+        const items = selectedItems();
+        if (!items.length) {
+          setOut("Select one or more items first.");
+          return;
+        }
+        const confirmed = confirm(`Delete ${items.length} selected item(s)? This removes stored text and vectors.`);
+        if (!confirmed) return;
+        let ok = 0;
+        let failed = 0;
+        for (const item of items) {
+          const form = new FormData();
+          form.append("owner", owner());
+          form.append("item_owner", String(item.owner || owner()));
+          form.append("item_id", String(item.id || ""));
+          const res = await csrfFetch("/chat/library/delete", { method: "POST", body: form });
+          if (!(await ensureAuth(res))) return;
+          if (res.ok) {
+            ok += 1;
+            selectedItemIds.delete(String(item.id || ""));
+            if (selectedItemId === String(item.id || "")) selectedItemId = "";
+          } else {
+            failed += 1;
+          }
+        }
+        if (!selectedItemId) {
+          detailsPanelEl.innerHTML = `
+            <h3>Select an item</h3>
+            <div class="panel-meta">Choose a source to browse full text and metadata.</div>
+          `;
+        }
+        setOut(`Batch delete complete. Deleted: ${ok}, failed: ${failed}.`);
+        await loadLibraryList();
+      }
+
+      async function batchExportSelected() {
+        const items = selectedItems();
+        if (!items.length) {
+          setOut("Select one or more items first.");
+          return;
+        }
+        let exported = 0;
+        for (const item of items) {
+          const itemOwner = String(item.owner || owner());
+          if (item.binary_path) {
+            window.open(
+              `/chat/library/download?owner=${encodeURIComponent(owner())}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}`,
+              "_blank"
+            );
+            exported += 1;
+            continue;
+          }
+          const res = await fetch(
+            `/chat/library/get?owner=${encodeURIComponent(owner())}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}`
+          );
+          if (!(await ensureAuth(res))) return;
+          if (!res.ok) continue;
+          const data = await res.json().catch(() => ({}));
+          const text = String(data.text || "");
+          const title = String(item.title || item.id || "library_item").replace(/[^a-zA-Z0-9._-]+/g, "_");
+          const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${title}.txt`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          exported += 1;
+        }
+        setOut(`Batch export started for ${exported} item(s).`);
       }
 
       async function saveNote() {
@@ -734,6 +919,24 @@
       document.getElementById("saveUrlBtn").addEventListener("click", saveUrl);
       document.getElementById("uploadBtn").addEventListener("click", uploadFile);
       document.getElementById("searchBtn").addEventListener("click", loadLibraryList);
+      selectAllPageEl.addEventListener("change", () => {
+        const checked = !!selectAllPageEl.checked;
+        for (const id of Object.keys(libraryItemCache)) {
+          if (checked) selectedItemIds.add(id);
+          else selectedItemIds.delete(id);
+        }
+        renderItemList(Object.values(libraryItemCache));
+      });
+      batchMoveBtn.addEventListener("click", async () => {
+        const target = batchMoveFolderEl.value.trim();
+        await batchUpdateSelected({ folder: target });
+      });
+      batchTagBtn.addEventListener("click", async () => {
+        const target = batchTagValueEl.value.trim();
+        await batchUpdateSelected({ tags: target });
+      });
+      batchDeleteBtn.addEventListener("click", batchDeleteSelected);
+      batchExportBtn.addEventListener("click", batchExportSelected);
       searchInputEl.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
           ev.preventDefault();

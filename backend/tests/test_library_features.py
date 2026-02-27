@@ -83,13 +83,31 @@ def test_library_update_metadata(tmp_path: Path, monkeypatch) -> None:
     client = _authed_client(monkeypatch)
     resp = client.post(
         "/chat/library/update",
-        data={"owner": owner, "item_id": "item1", "title": "New Title", "folder": "wk3", "tags": "tag1,tag2"},
+        data={
+            "owner": owner,
+            "item_id": "item1",
+            "title": "New Title",
+            "folder": "wk3",
+            "tags": "tag1,tag2",
+            "citation_title": "Pain affect in the absence of pain sensation",
+            "citation_authors": "Uhelski et al.",
+            "citation_year": "2012",
+            "citation_journal": "PAIN",
+            "citation_doi": "10.1016/j.pain.2012.01.012",
+            "citation_url": "https://doi.org/10.1016/j.pain.2012.01.012",
+        },
     )
     assert resp.status_code == 200
     item = resp.json()["item"]
     assert item["title"] == "New Title"
     assert item["folder"] == "wk3"
     assert item["tags"] == "tag1,tag2"
+    assert item["citation_title"] == "Pain affect in the absence of pain sensation"
+    assert item["citation_authors"] == "Uhelski et al."
+    assert item["citation_year"] == "2012"
+    assert item["citation_journal"] == "PAIN"
+    assert item["citation_doi"] == "10.1016/j.pain.2012.01.012"
+    assert item["citation_url"] == "https://doi.org/10.1016/j.pain.2012.01.012"
 
 
 def test_chat_stream_uses_selected_library_ids_as_pinned_context(tmp_path: Path, monkeypatch) -> None:

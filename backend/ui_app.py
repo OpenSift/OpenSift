@@ -2178,6 +2178,12 @@ def _library_index_text(
         "chunk_ids": ids,
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
+        "citation_title": "",
+        "citation_authors": "",
+        "citation_year": "",
+        "citation_journal": "",
+        "citation_doi": "",
+        "citation_url": "",
         "created_at": _now(),
     }
     add_source_item(owner, item, SOURCE_DIR)
@@ -2431,6 +2437,12 @@ async def library_update(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     effective_owner = _normalize_owner(item_owner or owner)
@@ -2438,6 +2450,12 @@ async def library_update(
         "title": (title or "").strip(),
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
+        "citation_title": (citation_title or "").strip(),
+        "citation_authors": (citation_authors or "").strip(),
+        "citation_year": (citation_year or "").strip(),
+        "citation_journal": (citation_journal or "").strip(),
+        "citation_doi": (citation_doi or "").strip(),
+        "citation_url": (citation_url or "").strip(),
     }
     item = update_source_item(effective_owner, item_id, patch, SOURCE_DIR)
     if not item:
