@@ -308,3 +308,63 @@ def test_chat_stream_emits_provider_diagnostics_status_events(tmp_path: Path, mo
     statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
     assert any("Generation fallback in use: openai / gpt-5.2" in s for s in statuses)
     assert any("Provider: Falling back from Claude Code CLI to OpenAI API." in s for s in statuses)
+
+
+def test_chat_stream_emits_direct_streaming_status_for_openai(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    async def _fake_stream_openai(prompt: str, model: str):
+        yield "Generated answer."
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+    monkeypatch.setattr(ui_app, "_stream_openai", _fake_stream_openai)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "stream-owner",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "openai",
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "true",
+        },
+    )
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
+    assert any("Generation path: streaming via openai /" in s for s in statuses)
+
+
+def test_chat_stream_rejects_invalid_retrieval_mode(monkeypatch) -> None:
+    client = _authed_client(monkeypatch)
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "bad-mode",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "claude_code",
+            "retrieval_mode": "not_a_mode",
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json().get("error") == "invalid_retrieval_mode"
