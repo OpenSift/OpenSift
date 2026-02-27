@@ -1491,6 +1491,7 @@ async def health():
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
@@ -1511,6 +1512,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 
     if not ok:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1539,6 +1541,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 @app.get("/set-password", response_class=HTMLResponse)
 async def set_password_page(request: Request):
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
@@ -1559,6 +1562,7 @@ async def set_password_submit(
 
     if not secrets.compare_digest(token, GEN_TOKEN):
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1574,6 +1578,7 @@ async def set_password_submit(
 
     if len(new_password) < 8:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1589,6 +1594,7 @@ async def set_password_submit(
 
     if new_password != confirm_password:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1634,6 +1640,7 @@ async def root(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     provider_caps = _provider_runtime_caps()
     response = templates.TemplateResponse(
+        request,
         "chat.html",
         {
             "request": request,
@@ -1661,6 +1668,7 @@ async def chat_page(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     provider_caps = _provider_runtime_caps()
     response = templates.TemplateResponse(
+        request,
         "chat.html",
         {
             "request": request,
@@ -1686,6 +1694,7 @@ async def settings_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -1704,6 +1713,7 @@ async def library_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "library.html",
         {
             "request": request,
