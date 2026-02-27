@@ -2844,8 +2844,9 @@ async def chat_stream(
                         passages.append({"text": docs2[i], "meta": metas2[i]})
                         if len(results) >= k:
                             break
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Best-effort fallback retrieval failed; continue without additional results.
+                    logger.exception("chat_stream_owner_fallback_query_failed owner=%s error=%s", owner, e)
 
         pinned_passages: List[Dict[str, Any]] = []
         pinned_sources: List[Dict[str, Any]] = []
