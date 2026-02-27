@@ -1245,6 +1245,12 @@ def _run_generate_result(
     def _diag(msg: str) -> None:
         diagnostics.append(msg)
 
+    def _compact_error(e: Exception) -> str:
+        text = (str(e) or e.__class__.__name__).replace("\n", " ").strip()
+        if len(text) > 240:
+            return text[:237] + "..."
+        return text
+
     def _success(text: str, provider_used: str, model_used: str) -> Dict[str, Any]:
         return {
             "text": text,
@@ -1268,7 +1274,7 @@ def _run_generate_result(
                 _diag(reason)
             return _success(_ensure_text(generate_with_openai(prompt, model=m), "OpenAI"), "openai", m)
         except Exception as e:
-            _diag(f"OpenAI failed: {e}")
+            _diag(f"OpenAI failed: {_compact_error(e)}")
             return None
 
     def _try_claude(m: str, reason: str) -> Optional[Dict[str, Any]]:
@@ -1289,7 +1295,7 @@ def _run_generate_result(
                 m,
             )
         except Exception as e:
-            _diag(f"Claude API failed: {e}")
+            _diag(f"Claude API failed: {_compact_error(e)}")
             return None
 
     def _try_claude_code(m: str, reason: str) -> Optional[Dict[str, Any]]:
@@ -1298,7 +1304,7 @@ def _run_generate_result(
                 _diag(reason)
             return _success(_ensure_text(generate_with_claude_code(prompt, model=m), "Claude Code CLI"), "claude_code", m)
         except Exception as e:
-            _diag(f"Claude Code CLI failed: {e}")
+            _diag(f"Claude Code CLI failed: {_compact_error(e)}")
             return None
 
     def _try_codex(m: str, reason: str) -> Optional[Dict[str, Any]]:
@@ -1307,7 +1313,7 @@ def _run_generate_result(
                 _diag(reason)
             return _success(_ensure_text(generate_with_codex(prompt, model=m), "Codex CLI"), "codex", m)
         except Exception as e:
-            _diag(f"Codex CLI failed: {e}")
+            _diag(f"Codex CLI failed: {_compact_error(e)}")
             return None
 
     if provider == "openai":
@@ -2947,6 +2953,8 @@ async def chat_stream(
             if p == "openai":
                 m = (model or DEFAULT_OPENAI_MODEL).strip()
                 if true_streaming:
+                    if show_thinking:
+                        yield _ndjson({"type": "status", "text": f"Generation path: streaming via openai / {m}"})
                     try:
                         async for delta in _stream_openai(prompt, m):
                             assistant_text += delta
@@ -2969,6 +2977,8 @@ async def chat_stream(
             elif p == "claude":
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
                 if true_streaming:
+                    if show_thinking:
+                        yield _ndjson({"type": "status", "text": f"Generation path: streaming via claude / {m}"})
                     try:
                         async for delta in _stream_anthropic(
                             prompt,
@@ -3020,6 +3030,8 @@ async def chat_stream(
                             await asyncio.sleep(0.01)
                 else:
                     if true_streaming:
+                        if show_thinking:
+                            yield _ndjson({"type": "status", "text": f"Generation path: streaming via codex / {m}"})
                         try:
                             async for delta in _stream_codex(prompt, m):
                                 assistant_text += delta
