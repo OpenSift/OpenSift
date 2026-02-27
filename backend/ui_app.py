@@ -456,6 +456,7 @@ MAX_CHAT_MESSAGE_CHARS = max(256, int(os.getenv("OPENSIFT_MAX_CHAT_MESSAGE_CHARS
 MAX_SESSION_IMPORT_CHARS = max(1024, int(os.getenv("OPENSIFT_MAX_SESSION_IMPORT_CHARS", "2000000")))
 MAX_HISTORY_TURNS = max(1, int(os.getenv("OPENSIFT_MAX_HISTORY_TURNS", "30")))
 MAX_RETRIEVAL_K = max(1, int(os.getenv("OPENSIFT_MAX_RETRIEVAL_K", "20")))
+ALLOWED_RETRIEVAL_MODES = ("semantic_plus_pinned", "semantic_only", "pinned_only")
 try:
     RETRIEVAL_TIMEOUT_SECONDS = max(5.0, float(os.getenv("OPENSIFT_RETRIEVAL_TIMEOUT_SECONDS", "300")))
 except Exception:
@@ -532,6 +533,13 @@ def _sanitize_post_params(mode: str, provider: str, k: int, history_turns: int) 
     k_clean = max(1, min(int(k), MAX_RETRIEVAL_K))
     turns_clean = max(0, min(int(history_turns), MAX_HISTORY_TURNS))
     return mode_clean, provider_clean, k_clean, turns_clean
+
+
+def _sanitize_retrieval_mode(retrieval_mode: str) -> str:
+    mode = (retrieval_mode or "semantic_plus_pinned").strip().lower()
+    if mode not in ALLOWED_RETRIEVAL_MODES:
+        raise ValueError("invalid_retrieval_mode")
+    return mode
 
 
 def _preferred_provider_default() -> str:
@@ -2665,6 +2673,7 @@ async def chat_stream(
     mode: str = Form("study_guide"),
     provider: str = Form("claude_code"),  # openai | claude | claude_code | codex
     model: str = Form(""),
+    retrieval_mode: str = Form("semantic_plus_pinned"),
     k: int = Form(8),
     history_turns: int = Form(DEFAULT_HISTORY_TURNS),
     history_enabled: bool = Form(True),
@@ -2685,6 +2694,7 @@ async def chat_stream(
         )
     try:
         mode, provider, k, history_turns = _sanitize_post_params(mode, provider, k, history_turns)
+        retrieval_mode = _sanitize_retrieval_mode(retrieval_mode)
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
@@ -2704,11 +2714,12 @@ async def chat_stream(
     provider = resolved_provider
     model = resolved_model
     logger.info(
-        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s selected_library_ids=%s",
+        "chat_stream_start owner=%s mode=%s provider=%s model=%s retrieval_mode=%s k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s selected_library_ids=%s",
         owner,
         mode,
         provider,
         model,
+        retrieval_mode,
         k,
         history_enabled,
         thinking_enabled,
@@ -2738,6 +2749,12 @@ async def chat_stream(
                 )
             else:
                 yield _ndjson({"type": "status", "text": f"Using provider/model: {provider or 'auto'} / {active_model}"})
+            retrieval_label = {
+                "semantic_plus_pinned": "Semantic + pinned",
+                "semantic_only": "Semantic only",
+                "pinned_only": "Pinned only",
+            }.get(retrieval_mode, retrieval_mode)
+            yield _ndjson({"type": "status", "text": f"Retrieval mode: {retrieval_label}"})
             yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
             if using_local_embeddings() and not local_embedding_model_loaded():
                 yield _ndjson(
@@ -2748,85 +2765,91 @@ async def chat_stream(
                 )
             if provider_note:
                 yield _ndjson({"type": "status", "text": provider_note})
-            if (selected_library_ids or "").strip():
+            if retrieval_mode != "semantic_only" and (selected_library_ids or "").strip():
                 yield _ndjson({"type": "status", "text": "Adding selected library items as pinned context…"})
-
-        # Retrieve
-        try:
-            with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
-                q_emb = await anyio.to_thread.run_sync(
-                    lambda: embed_texts([msg])[0],
-                    abandon_on_cancel=True,
-                )
-                owner_where = {"owner": owner} if owner else None
-                res = await anyio.to_thread.run_sync(
-                    lambda: db.query(q_emb, k=k, where=owner_where),
-                    abandon_on_cancel=True,
-                )
-        except TimeoutError:
-            err = (
-                f"Retrieval timed out after {int(RETRIEVAL_TIMEOUT_SECONDS)}s. "
-                "Try a shorter question, re-run once embeddings are warm, or ingest smaller sources."
-            )
-            logger.exception("chat_stream_retrieval_timeout owner=%s timeout_s=%.1f", owner, RETRIEVAL_TIMEOUT_SECONDS)
-            yield _ndjson({"type": "error", "message": err})
-            assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
-            _history_append(owner, assistant_msg)
-            yield _ndjson({"type": "done", "ts": _now()})
-            return
-        except Exception as e:
-            err = f"Retrieval failed: {e}"
-            logger.exception("chat_stream_retrieval_failed owner=%s", owner)
-            yield _ndjson({"type": "error", "message": err})
-            assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
-            _history_append(owner, assistant_msg)
-            yield _ndjson({"type": "done", "ts": _now()})
-            return
-
-        docs = res.get("documents", [[]])[0]
-        metas = res.get("metadatas", [[]])[0]
-        dists = res.get("distances", [[]])[0]
-        ids = res.get("ids", [[]])[0]
 
         results: List[Dict[str, Any]] = []
         passages: List[Dict[str, Any]] = []
-        for i in range(len(docs)):
-            if owner and metas[i].get("owner") != owner:
-                continue
-            results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
-            passages.append({"text": docs[i], "meta": metas[i]})
-
-        # Defensive fallback: if owner-filter query returned nothing, retry a global query
-        # and apply owner filtering locally. This avoids false negatives on some DB filter paths.
-        if owner and not results:
-            try:
-                with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
-                    res2 = await anyio.to_thread.run_sync(
-                        lambda: db.query(q_emb, k=max(k * 3, 24), where=None),
-                        abandon_on_cancel=True,
-                    )
-                docs2 = res2.get("documents", [[]])[0]
-                metas2 = res2.get("metadatas", [[]])[0]
-                dists2 = res2.get("distances", [[]])[0]
-                ids2 = res2.get("ids", [[]])[0]
-                for i in range(len(docs2)):
-                    if (metas2[i] or {}).get("owner") != owner:
-                        continue
-                    results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
-                    passages.append({"text": docs2[i], "meta": metas2[i]})
-                    if len(results) >= k:
-                        break
-            except Exception:
-                pass
 
         selected_ids = [
             x.strip()
             for x in (selected_library_ids or "").split(",")
             if x.strip()
         ][:8]
+
+        use_semantic_retrieval = retrieval_mode in ("semantic_plus_pinned", "semantic_only")
+        use_pinned_context = retrieval_mode in ("semantic_plus_pinned", "pinned_only")
+
+        if use_semantic_retrieval:
+            # Retrieve
+            try:
+                with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
+                    q_emb = await anyio.to_thread.run_sync(
+                        lambda: embed_texts([msg])[0],
+                        abandon_on_cancel=True,
+                    )
+                    owner_where = {"owner": owner} if owner else None
+                    res = await anyio.to_thread.run_sync(
+                        lambda: db.query(q_emb, k=k, where=owner_where),
+                        abandon_on_cancel=True,
+                    )
+            except TimeoutError:
+                err = (
+                    f"Retrieval timed out after {int(RETRIEVAL_TIMEOUT_SECONDS)}s. "
+                    "Try a shorter question, re-run once embeddings are warm, or ingest smaller sources."
+                )
+                logger.exception("chat_stream_retrieval_timeout owner=%s timeout_s=%.1f", owner, RETRIEVAL_TIMEOUT_SECONDS)
+                yield _ndjson({"type": "error", "message": err})
+                assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
+                _history_append(owner, assistant_msg)
+                yield _ndjson({"type": "done", "ts": _now()})
+                return
+            except Exception as e:
+                err = f"Retrieval failed: {e}"
+                logger.exception("chat_stream_retrieval_failed owner=%s", owner)
+                yield _ndjson({"type": "error", "message": err})
+                assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
+                _history_append(owner, assistant_msg)
+                yield _ndjson({"type": "done", "ts": _now()})
+                return
+
+            docs = res.get("documents", [[]])[0]
+            metas = res.get("metadatas", [[]])[0]
+            dists = res.get("distances", [[]])[0]
+            ids = res.get("ids", [[]])[0]
+
+            for i in range(len(docs)):
+                if owner and metas[i].get("owner") != owner:
+                    continue
+                results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
+                passages.append({"text": docs[i], "meta": metas[i]})
+
+            # Defensive fallback: if owner-filter query returned nothing, retry a global query
+            # and apply owner filtering locally. This avoids false negatives on some DB filter paths.
+            if owner and not results:
+                try:
+                    with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
+                        res2 = await anyio.to_thread.run_sync(
+                            lambda: db.query(q_emb, k=max(k * 3, 24), where=None),
+                            abandon_on_cancel=True,
+                        )
+                    docs2 = res2.get("documents", [[]])[0]
+                    metas2 = res2.get("metadatas", [[]])[0]
+                    dists2 = res2.get("distances", [[]])[0]
+                    ids2 = res2.get("ids", [[]])[0]
+                    for i in range(len(docs2)):
+                        if (metas2[i] or {}).get("owner") != owner:
+                            continue
+                        results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
+                        passages.append({"text": docs2[i], "meta": metas2[i]})
+                        if len(results) >= k:
+                            break
+                except Exception:
+                    pass
+
         pinned_passages: List[Dict[str, Any]] = []
         pinned_sources: List[Dict[str, Any]] = []
-        if selected_ids:
+        if use_pinned_context and selected_ids:
             for sid in selected_ids:
                 item = get_source_item(owner, sid, SOURCE_DIR)
                 if not item:
