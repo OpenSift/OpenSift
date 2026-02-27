@@ -1,5 +1,39 @@
 # OpenSift Release Notes
 
+## v1.6.0-alpha
+Release date: 2026-02-27
+
+This release finalizes provider reliability, retrieval controls, and citation-aware responses for the new global library/chat experience.
+
+### Highlights
+- Hardened CLI provider execution for Claude/Codex to reject unusable "error-like" stdout and retry fallback invocation paths.
+- Added retrieval behavior controls to chat:
+  - retrieval mode: `semantic_plus_pinned`, `semantic_only`, `pinned_only`
+  - retrieval depth: `fast`, `balanced`, `deep`
+- Added structured citation metadata in stream + persisted assistant messages.
+- Upgraded references rendering in chat to support openable internal source links.
+- Added optional citation metadata fields to library items:
+  - title, authors, year, journal, DOI, URL
+- Added compact direct-streaming diagnostics/status behavior for generation failures.
+
+### Added
+- Provider output validation tests:
+  - `backend/tests/test_providers_cli_output.py`
+- Retrieval/citation coverage updates in:
+  - `backend/tests/test_auth_session_streaming.py`
+  - `backend/tests/test_library_features.py`
+  - `backend/tests/test_settings_and_stream_ui.py`
+
+### Changed
+- `/chat/stream` now emits richer status information (requested/active provider context and compact diagnostics pathing).
+- Chat references UI now prefers structured `citations` metadata while retaining backwards compatibility for legacy `sources`.
+- Library metadata editing now includes citation fields for improved references and export quality.
+
+### Versioning
+- Bumped app version to `1.6.0-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
 ## v1.5.0-alpha
 Release date: 2026-02-20
 
