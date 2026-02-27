@@ -90,7 +90,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.5.0-alpha"
+OPENSIFT_VERSION = "1.6.0-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
@@ -1253,6 +1253,12 @@ def _run_generate_result(
     def _diag(msg: str) -> None:
         diagnostics.append(msg)
 
+    def _compact_error(e: Exception) -> str:
+        text = (str(e) or e.__class__.__name__).replace("\n", " ").strip()
+        if len(text) > 240:
+            return text[:237] + "..."
+        return text
+
     def _success(text: str, provider_used: str, model_used: str) -> Dict[str, Any]:
         return {
             "text": text,
@@ -1276,7 +1282,7 @@ def _run_generate_result(
                 _diag(reason)
             return _success(_ensure_text(generate_with_openai(prompt, model=m), "OpenAI"), "openai", m)
         except Exception as e:
-            _diag(f"OpenAI failed: {e}")
+            _diag(f"OpenAI failed: {_compact_error(e)}")
             return None
 
     def _try_claude(m: str, reason: str) -> Optional[Dict[str, Any]]:
@@ -1297,7 +1303,7 @@ def _run_generate_result(
                 m,
             )
         except Exception as e:
-            _diag(f"Claude API failed: {e}")
+            _diag(f"Claude API failed: {_compact_error(e)}")
             return None
 
     def _try_claude_code(m: str, reason: str) -> Optional[Dict[str, Any]]:
@@ -1306,7 +1312,7 @@ def _run_generate_result(
                 _diag(reason)
             return _success(_ensure_text(generate_with_claude_code(prompt, model=m), "Claude Code CLI"), "claude_code", m)
         except Exception as e:
-            _diag(f"Claude Code CLI failed: {e}")
+            _diag(f"Claude Code CLI failed: {_compact_error(e)}")
             return None
 
     def _try_codex(m: str, reason: str) -> Optional[Dict[str, Any]]:
@@ -1315,7 +1321,7 @@ def _run_generate_result(
                 _diag(reason)
             return _success(_ensure_text(generate_with_codex(prompt, model=m), "Codex CLI"), "codex", m)
         except Exception as e:
-            _diag(f"Codex CLI failed: {e}")
+            _diag(f"Codex CLI failed: {_compact_error(e)}")
             return None
 
     if provider == "openai":
@@ -1471,6 +1477,7 @@ async def health():
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
@@ -1491,6 +1498,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 
     if not ok:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1519,6 +1527,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 @app.get("/set-password", response_class=HTMLResponse)
 async def set_password_page(request: Request):
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
@@ -1539,6 +1548,7 @@ async def set_password_submit(
 
     if not secrets.compare_digest(token, GEN_TOKEN):
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1554,6 +1564,7 @@ async def set_password_submit(
 
     if len(new_password) < 8:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1569,6 +1580,7 @@ async def set_password_submit(
 
     if new_password != confirm_password:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1614,6 +1626,7 @@ async def root(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     provider_caps = _provider_runtime_caps()
     response = templates.TemplateResponse(
+        request,
         "chat.html",
         {
             "request": request,
@@ -1641,6 +1654,7 @@ async def chat_page(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     provider_caps = _provider_runtime_caps()
     response = templates.TemplateResponse(
+        request,
         "chat.html",
         {
             "request": request,
@@ -1666,6 +1680,7 @@ async def settings_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -1684,6 +1699,7 @@ async def library_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "library.html",
         {
             "request": request,
@@ -2139,6 +2155,12 @@ def _library_index_text(
     source_id: str = "",
     folder: str = "",
     tags: str = "",
+    citation_title: str = "",
+    citation_authors: str = "",
+    citation_year: str = "",
+    citation_journal: str = "",
+    citation_doi: str = "",
+    citation_url: str = "",
 ) -> Dict[str, Any]:
     owner = _normalize_owner(owner)
     clean_text = (text or "").strip()
@@ -2186,6 +2208,12 @@ def _library_index_text(
         "chunk_ids": ids,
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
+        "citation_title": (citation_title or "").strip(),
+        "citation_authors": (citation_authors or "").strip(),
+        "citation_year": (citation_year or "").strip(),
+        "citation_journal": (citation_journal or "").strip(),
+        "citation_doi": (citation_doi or "").strip(),
+        "citation_url": (citation_url or "").strip(),
         "created_at": _now(),
     }
     add_source_item(owner, item, SOURCE_DIR)
@@ -2307,6 +2335,12 @@ async def library_note(
     note: str = Form(...),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     text = (note or "").strip()
@@ -2320,6 +2354,12 @@ async def library_note(
             text,
             folder=folder,
             tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
         )
     )
     return JSONResponse({"ok": True, "owner": owner, "item": item})
@@ -2332,6 +2372,12 @@ async def library_url(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     raw_url = (url or "").strip()
@@ -2354,6 +2400,12 @@ async def library_url(
             url=raw_url,
             folder=folder,
             tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
         )
     )
     return JSONResponse({"ok": True, "owner": owner, "item": item})
@@ -2365,6 +2417,12 @@ async def library_upload(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
     file: UploadFile = File(...),
 ):
     owner = _normalize_owner(owner)
@@ -2406,6 +2464,12 @@ async def library_upload(
             source_id=source_id,
             folder=folder,
             tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
         )
     )
     return JSONResponse({"ok": True, "owner": owner, "item": item})
@@ -2439,6 +2503,12 @@ async def library_update(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     effective_owner = _normalize_owner(item_owner or owner)
@@ -2446,6 +2516,12 @@ async def library_update(
         "title": (title or "").strip(),
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
+        "citation_title": (citation_title or "").strip(),
+        "citation_authors": (citation_authors or "").strip(),
+        "citation_year": (citation_year or "").strip(),
+        "citation_journal": (citation_journal or "").strip(),
+        "citation_doi": (citation_doi or "").strip(),
+        "citation_url": (citation_url or "").strip(),
     }
     item = update_source_item(effective_owner, item_id, patch, SOURCE_DIR)
     if not item:
@@ -2682,6 +2758,8 @@ async def chat_stream(
     show_thinking: bool = Form(True),
     true_streaming: bool = Form(True),
     selected_library_ids: str = Form(""),
+    retrieval_mode: str = Form("semantic_plus_pinned"),
+    retrieval_depth: str = Form("balanced"),
 ):
     owner = _normalize_owner(owner)
     msg = (message or "").strip()
@@ -2697,6 +2775,11 @@ async def chat_stream(
         retrieval_mode = _sanitize_retrieval_mode(retrieval_mode)
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    try:
+        retrieval_mode, retrieval_depth = _sanitize_retrieval_params(retrieval_mode, retrieval_depth)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    effective_k = _effective_retrieval_k(k, retrieval_depth)
 
     requested_provider = provider
     requested_model = (model or "").strip()
@@ -2721,6 +2804,9 @@ async def chat_stream(
         model,
         retrieval_mode,
         k,
+        effective_k,
+        retrieval_mode,
+        retrieval_depth,
         history_enabled,
         thinking_enabled,
         thinking_level,
@@ -2876,6 +2962,8 @@ async def chat_stream(
                         "source": item.get("title") or item.get("original_name") or sid,
                         "kind": "library_selected",
                         "url": item.get("url") or "",
+                        "source_id": sid,
+                        "owner": owner,
                         "distance": None,
                         "preview": text[:240],
                     }
@@ -2883,9 +2971,12 @@ async def chat_stream(
 
         if not results and not pinned_passages:
             logger.info(
-                "chat_stream_no_results owner=%s k=%d duration_ms=%.2f",
+                "chat_stream_no_results owner=%s k=%d effective_k=%d retrieval_mode=%s retrieval_depth=%s duration_ms=%.2f",
                 owner,
                 k,
+                effective_k,
+                retrieval_mode,
+                retrieval_depth,
                 (time.perf_counter() - t0) * 1000.0,
             )
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
@@ -2899,6 +2990,7 @@ async def chat_stream(
                 "text": assistant_text,
                 "ts": _now(),
                 "sources": [],
+                "citations": [],
                 "break_reminder": add_break,
             }
             _history_append(owner, assistant_msg)
@@ -2907,18 +2999,50 @@ async def chat_stream(
             yield _ndjson({"type": "done", "ts": _now()})
             return
 
-        sources_payload = [
-            {
-                "source": (r["meta"] or {}).get("source"),
-                "kind": (r["meta"] or {}).get("kind"),
-                "url": (r["meta"] or {}).get("url"),
-                "distance": r["distance"],
-                "preview": (r["text"] or "")[:240],
+        sources_payload = []
+        citations_payload = []
+        for idx, r in enumerate(results[:5], start=1):
+            meta = r.get("meta") or {}
+            source_item = {
+                "source": meta.get("source"),
+                "kind": meta.get("kind"),
+                "url": meta.get("url"),
+                "distance": r.get("distance"),
+                "preview": (r.get("text") or "")[:240],
+                "source_id": meta.get("source_id"),
+                "owner": meta.get("owner"),
             }
-            for r in results[:5]
-        ]
-        sources_payload.extend(pinned_sources[:5])
+            sources_payload.append(source_item)
+            citations_payload.append(
+                {
+                    "n": idx,
+                    "label": f"[{idx}]",
+                    "source": source_item.get("source"),
+                    "kind": source_item.get("kind"),
+                    "url": source_item.get("url"),
+                    "source_id": source_item.get("source_id"),
+                    "owner": source_item.get("owner"),
+                    "distance": source_item.get("distance"),
+                }
+            )
+        for src in pinned_sources[:5]:
+            next_n = len(citations_payload) + 1
+            item = dict(src)
+            sources_payload.append(item)
+            citations_payload.append(
+                {
+                    "n": next_n,
+                    "label": f"[{next_n}]",
+                    "source": item.get("source"),
+                    "kind": item.get("kind"),
+                    "url": item.get("url"),
+                    "source_id": item.get("source_id"),
+                    "owner": item.get("owner"),
+                    "distance": item.get("distance"),
+                }
+            )
         yield _ndjson({"type": "sources", "sources": sources_payload})
+        yield _ndjson({"type": "citations", "citations": citations_payload})
 
         # History-aware prompt
         history_before_response = _history_snapshot(owner)
@@ -2971,6 +3095,8 @@ async def chat_stream(
             if p == "openai":
                 m = (model or DEFAULT_OPENAI_MODEL).strip()
                 if true_streaming:
+                    if show_thinking:
+                        yield _ndjson({"type": "status", "text": f"Generation path: streaming via openai / {m}"})
                     try:
                         async for delta in _stream_openai(prompt, m):
                             assistant_text += delta
@@ -2993,6 +3119,8 @@ async def chat_stream(
             elif p == "claude":
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
                 if true_streaming:
+                    if show_thinking:
+                        yield _ndjson({"type": "status", "text": f"Generation path: streaming via claude / {m}"})
                     try:
                         async for delta in _stream_anthropic(
                             prompt,
@@ -3044,6 +3172,8 @@ async def chat_stream(
                             await asyncio.sleep(0.01)
                 else:
                     if true_streaming:
+                        if show_thinking:
+                            yield _ndjson({"type": "status", "text": f"Generation path: streaming via codex / {m}"})
                         try:
                             async for delta in _stream_codex(prompt, m):
                                 assistant_text += delta
@@ -3143,9 +3273,12 @@ async def chat_stream(
             "text": assistant_text,
             "ts": _now(),
             "sources": sources_payload,
+            "citations": citations_payload,
             "mode": mode,
             "provider": provider,
             "model": model,
+            "retrieval_mode": retrieval_mode,
+            "retrieval_depth": retrieval_depth,
         }
         history_for_breaks = _history_snapshot(owner)
         add_break = should_add_break_reminder(history_for_breaks)

@@ -66,6 +66,7 @@ def test_chat_page_has_ingest_controls(monkeypatch) -> None:
     assert 'id="libraryBtn"' in html
     assert 'id="retrievalMode"' in html
     assert 'evt.type === "sources"' in html
+    assert 'evt.type === "citations"' in html
     assert "References" in html
 
 
