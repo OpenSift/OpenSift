@@ -2159,6 +2159,12 @@ def _library_index_text(
     source_id: str = "",
     folder: str = "",
     tags: str = "",
+    citation_title: str = "",
+    citation_authors: str = "",
+    citation_year: str = "",
+    citation_journal: str = "",
+    citation_doi: str = "",
+    citation_url: str = "",
 ) -> Dict[str, Any]:
     owner = _normalize_owner(owner)
     clean_text = (text or "").strip()
@@ -2206,6 +2212,12 @@ def _library_index_text(
         "chunk_ids": ids,
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
+        "citation_title": (citation_title or "").strip(),
+        "citation_authors": (citation_authors or "").strip(),
+        "citation_year": (citation_year or "").strip(),
+        "citation_journal": (citation_journal or "").strip(),
+        "citation_doi": (citation_doi or "").strip(),
+        "citation_url": (citation_url or "").strip(),
         "created_at": _now(),
     }
     add_source_item(owner, item, SOURCE_DIR)
@@ -2327,6 +2339,12 @@ async def library_note(
     note: str = Form(...),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     text = (note or "").strip()
@@ -2340,6 +2358,12 @@ async def library_note(
             text,
             folder=folder,
             tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
         )
     )
     return JSONResponse({"ok": True, "owner": owner, "item": item})
@@ -2352,6 +2376,12 @@ async def library_url(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     raw_url = (url or "").strip()
@@ -2374,6 +2404,12 @@ async def library_url(
             url=raw_url,
             folder=folder,
             tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
         )
     )
     return JSONResponse({"ok": True, "owner": owner, "item": item})
@@ -2385,6 +2421,12 @@ async def library_upload(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
     file: UploadFile = File(...),
 ):
     owner = _normalize_owner(owner)
@@ -2426,6 +2468,12 @@ async def library_upload(
             source_id=source_id,
             folder=folder,
             tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
         )
     )
     return JSONResponse({"ok": True, "owner": owner, "item": item})
@@ -2459,6 +2507,12 @@ async def library_update(
     title: str = Form(""),
     folder: str = Form(""),
     tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
     effective_owner = _normalize_owner(item_owner or owner)
@@ -2466,6 +2520,12 @@ async def library_update(
         "title": (title or "").strip(),
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
+        "citation_title": (citation_title or "").strip(),
+        "citation_authors": (citation_authors or "").strip(),
+        "citation_year": (citation_year or "").strip(),
+        "citation_journal": (citation_journal or "").strip(),
+        "citation_doi": (citation_doi or "").strip(),
+        "citation_url": (citation_url or "").strip(),
     }
     item = update_source_item(effective_owner, item_id, patch, SOURCE_DIR)
     if not item:
