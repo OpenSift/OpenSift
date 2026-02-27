@@ -65,14 +65,12 @@
         grid-template-columns: 1fr 160px 160px 180px 100px 100px 140px;
         gap: 8px;
       }
-      .batchbar {
+      .presets {
         border-bottom: 1px solid var(--line);
         padding: 10px 14px;
         display: grid;
-        grid-template-columns: auto 180px 220px auto auto auto auto;
+        grid-template-columns: 1fr 1fr auto auto auto;
         gap: 8px;
-        align-items: center;
-        background: #f8fbff;
       }
       .pagination {
         border-top: 1px solid var(--line);
@@ -275,14 +273,14 @@
           </select>
           <button id="searchBtn" type="button">Search</button>
         </div>
-        <div class="batchbar">
-          <label class="hint"><input id="selectAllPage" type="checkbox" /> Select page</label>
-          <input id="batchMoveFolder" placeholder="Move selected to folder..." />
-          <input id="batchTagValue" placeholder="Set selected tags (comma-separated)" />
-          <button id="batchMoveBtn" type="button">Move</button>
-          <button id="batchTagBtn" type="button">Set Tags</button>
-          <button id="batchExportBtn" type="button">Export</button>
-          <button id="batchDeleteBtn" type="button" class="danger">Delete</button>
+        <div class="presets">
+          <input id="presetNameInput" placeholder="Preset name..." />
+          <select id="presetSelect">
+            <option value="">Saved presets...</option>
+          </select>
+          <button id="savePresetBtn" type="button">Save Preset</button>
+          <button id="applyPresetBtn" type="button">Apply</button>
+          <button id="deletePresetBtn" type="button" class="danger">Delete</button>
         </div>
         <div class="content">
           <section id="listPane" class="list-pane"></section>
@@ -339,19 +337,18 @@
       const pageMetaEl = document.getElementById("pageMeta");
       const pageSizeEl = document.getElementById("pageSize");
       const allOwnersToggleEl = document.getElementById("allOwnersToggle");
-      const selectAllPageEl = document.getElementById("selectAllPage");
-      const batchMoveFolderEl = document.getElementById("batchMoveFolder");
-      const batchTagValueEl = document.getElementById("batchTagValue");
-      const batchMoveBtn = document.getElementById("batchMoveBtn");
-      const batchTagBtn = document.getElementById("batchTagBtn");
-      const batchExportBtn = document.getElementById("batchExportBtn");
-      const batchDeleteBtn = document.getElementById("batchDeleteBtn");
+      const presetNameInputEl = document.getElementById("presetNameInput");
+      const presetSelectEl = document.getElementById("presetSelect");
+      const savePresetBtn = document.getElementById("savePresetBtn");
+      const applyPresetBtn = document.getElementById("applyPresetBtn");
+      const deletePresetBtn = document.getElementById("deletePresetBtn");
 
       let selectedItemId = "";
       let currentPage = 1;
       let totalPages = 1;
       let libraryItemCache = {};
-      let selectedItemIds = new Set();
+      let presetMap = {};
+      let pendingFolderFilter = "";
 
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -401,23 +398,103 @@
         actionOutEl.textContent = text || "";
       }
 
-      function selectedItems() {
-        const out = [];
-        for (const id of selectedItemIds) {
-          const item = libraryItemCache[id];
-          if (item) out.push(item);
-        }
-        return out;
+      function presetStorageKey() {
+        return `opensift_library_presets::${owner()}`;
       }
 
-      function updateSelectionUI() {
-        const count = selectedItems().length;
-        if (count > 0) {
-          setOut(`${count} selected item(s).`);
+      function readPresetMap() {
+        try {
+          const raw = localStorage.getItem(presetStorageKey()) || "{}";
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+          return parsed;
+        } catch (_) {
+          return {};
         }
-        const pageIds = Object.keys(libraryItemCache);
-        const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedItemIds.has(id));
-        selectAllPageEl.checked = allOnPageSelected;
+      }
+
+      function writePresetMap(map) {
+        localStorage.setItem(presetStorageKey(), JSON.stringify(map || {}));
+      }
+
+      function renderPresetOptions() {
+        const names = Object.keys(presetMap).sort((a, b) => a.localeCompare(b));
+        const current = presetSelectEl.value || "";
+        presetSelectEl.innerHTML = '<option value="">Saved presets...</option>';
+        for (const name of names) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          presetSelectEl.appendChild(opt);
+        }
+        if (current && names.includes(current)) presetSelectEl.value = current;
+      }
+
+      function loadPresetsForOwner() {
+        presetMap = readPresetMap();
+        renderPresetOptions();
+      }
+
+      function currentFilterSnapshot() {
+        return {
+          q: searchInputEl.value.trim(),
+          kind: kindFilterEl.value || "",
+          folder: folderFilterEl.value || "",
+          tags: tagsFilterEl.value.trim(),
+          sortBy: sortByEl.value || "created_at",
+          sortDir: sortDirEl.value || "desc",
+          pageSize: pageSizeEl.value || "20",
+          allOwners: !!allOwnersToggleEl.checked,
+        };
+      }
+
+      function applyFilterSnapshot(snap) {
+        if (!snap || typeof snap !== "object") return;
+        searchInputEl.value = String(snap.q || "");
+        kindFilterEl.value = String(snap.kind || "");
+        pendingFolderFilter = String(snap.folder || "");
+        tagsFilterEl.value = String(snap.tags || "");
+        sortByEl.value = String(snap.sortBy || "created_at");
+        sortDirEl.value = String(snap.sortDir || "desc");
+        pageSizeEl.value = String(snap.pageSize || "20");
+        allOwnersToggleEl.checked = !!snap.allOwners;
+      }
+
+      function saveCurrentPreset() {
+        const name = (presetNameInputEl.value || "").trim();
+        if (!name) {
+          setOut("Enter a preset name first.");
+          return;
+        }
+        presetMap[name] = currentFilterSnapshot();
+        writePresetMap(presetMap);
+        renderPresetOptions();
+        presetSelectEl.value = name;
+        setOut(`Saved preset '${name}'.`);
+      }
+
+      async function applySelectedPreset() {
+        const name = (presetSelectEl.value || "").trim();
+        if (!name || !presetMap[name]) {
+          setOut("Choose a saved preset first.");
+          return;
+        }
+        applyFilterSnapshot(presetMap[name]);
+        currentPage = 1;
+        await loadLibraryList();
+        setOut(`Applied preset '${name}'.`);
+      }
+
+      function deleteSelectedPreset() {
+        const name = (presetSelectEl.value || "").trim();
+        if (!name || !presetMap[name]) {
+          setOut("Choose a saved preset first.");
+          return;
+        }
+        delete presetMap[name];
+        writePresetMap(presetMap);
+        renderPresetOptions();
+        setOut(`Deleted preset '${name}'.`);
       }
 
       function fmtTs(ts) {
@@ -464,7 +541,7 @@
         nextPageBtn.disabled = currentPage >= totalPages;
         countPillEl.textContent = `${total} item${total === 1 ? "" : "s"}`;
         const folders = data.folders || [];
-        const previousFolder = folderFilterEl.value;
+        const previousFolder = pendingFolderFilter || folderFilterEl.value;
         folderFilterEl.innerHTML = '<option value="">All Folders</option>';
         for (const f of folders) {
           const opt = document.createElement("option");
@@ -473,6 +550,7 @@
           folderFilterEl.appendChild(opt);
         }
         if (previousFolder) folderFilterEl.value = previousFolder;
+        pendingFolderFilter = "";
         renderItemList(items);
       }
 
@@ -974,6 +1052,19 @@
         currentPage = 1;
         loadLibraryList();
       });
+      savePresetBtn.addEventListener("click", saveCurrentPreset);
+      applyPresetBtn.addEventListener("click", applySelectedPreset);
+      deletePresetBtn.addEventListener("click", deleteSelectedPreset);
+      presetSelectEl.addEventListener("change", () => {
+        const name = (presetSelectEl.value || "").trim();
+        presetNameInputEl.value = name;
+      });
+      presetNameInputEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          saveCurrentPreset();
+        }
+      });
       prevPageBtn.addEventListener("click", () => {
         if (currentPage <= 1) return;
         currentPage -= 1;
@@ -984,8 +1075,12 @@
         currentPage += 1;
         loadLibraryList();
       });
-      ownerEl.addEventListener("change", loadLibraryList);
+      ownerEl.addEventListener("change", () => {
+        loadPresetsForOwner();
+        loadLibraryList();
+      });
 
+      loadPresetsForOwner();
       loadLibraryList().catch(() => {
         setOut("Failed to load library on startup.");
       });
