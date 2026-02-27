@@ -82,6 +82,11 @@ def test_library_page_has_expected_controls(monkeypatch) -> None:
     assert 'id="uploadBtn"' in html
     assert 'id="uploadProgress"' in html
     assert 'id="searchInput"' in html
+    assert 'id="presetNameInput"' in html
+    assert 'id="presetSelect"' in html
+    assert 'id="savePresetBtn"' in html
+    assert 'id="applyPresetBtn"' in html
+    assert 'id="deletePresetBtn"' in html
     assert 'id="kindFilter"' in html
     assert 'id="listPane"' in html
     assert 'id="detailsPanel"' in html
