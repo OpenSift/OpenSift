@@ -269,6 +269,92 @@ def test_session_delete_optionally_deletes_linked_library_items(tmp_path: Path, 
     assert "c1" in fake_db.deleted_ids and "c2" in fake_db.deleted_ids
 
 
+def test_library_batch_mutation_supports_partial_failure(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SOURCE_DIR", str(tmp_path / "sources"))
+
+    class _DB:
+        def __init__(self):
+            self.deleted_ids = []
+
+        def delete(self, ids):
+            self.deleted_ids.extend(ids or [])
+
+    fake_db = _DB()
+    monkeypatch.setattr(ui_app, "db", fake_db)
+
+    owner = "bio101"
+    base = str(tmp_path / "sources")
+    text_a = source_store.write_text_blob(owner, "a1", "alpha", base)
+    source_store.add_item(
+        owner,
+        {
+            "id": "a1",
+            "title": "A1",
+            "kind": "note",
+            "text_path": text_a,
+            "chunk_ids": ["c-a1-1"],
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        base,
+    )
+    text_b = source_store.write_text_blob(owner, "b1", "beta", base)
+    source_store.add_item(
+        owner,
+        {
+            "id": "b1",
+            "title": "B1",
+            "kind": "note",
+            "text_path": text_b,
+            "chunk_ids": ["c-b1-1"],
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        base,
+    )
+
+    client = _authed_client(monkeypatch)
+    resp = client.post(
+        "/chat/library/batch",
+        json={
+            "owner": owner,
+            "operations": [
+                {"op": "update", "item_id": "a1", "title": "A1 Updated", "folder": "wk1", "tags": "tag1"},
+                {"op": "delete", "item_id": "missing"},
+                {"op": "delete", "item_id": "b1"},
+            ],
+        },
+    )
+    assert resp.status_code == 207
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["partial_failure"] is True
+    assert payload["summary"] == {
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "updated": 1,
+        "deleted": 1,
+    }
+    assert payload["results"][0]["ok"] is True
+    assert payload["results"][0]["item"]["title"] == "A1 Updated"
+    assert payload["results"][1]["ok"] is False
+    assert payload["results"][1]["error"] == "not_found"
+    assert payload["results"][2]["ok"] is True
+    assert payload["results"][2]["op"] == "delete"
+
+    updated = source_store.get_item(owner, "a1", base)
+    assert updated is not None
+    assert updated["title"] == "A1 Updated"
+    assert source_store.get_item(owner, "b1", base) is None
+    assert "c-b1-1" in fake_db.deleted_ids
+
+
+def test_library_batch_mutation_rejects_invalid_payload(monkeypatch) -> None:
+    client = _authed_client(monkeypatch)
+    resp = client.post("/chat/library/batch", json={"owner": "bio101", "operations": []})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "operations_required"
+
+
 def test_library_pdf_preview_endpoint_serves_inline_pdf(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ui_app, "SOURCE_DIR", str(tmp_path / "sources"))
     owner = "bio101"
