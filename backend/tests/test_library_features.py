@@ -83,13 +83,31 @@ def test_library_update_metadata(tmp_path: Path, monkeypatch) -> None:
     client = _authed_client(monkeypatch)
     resp = client.post(
         "/chat/library/update",
-        data={"owner": owner, "item_id": "item1", "title": "New Title", "folder": "wk3", "tags": "tag1,tag2"},
+        data={
+            "owner": owner,
+            "item_id": "item1",
+            "title": "New Title",
+            "folder": "wk3",
+            "tags": "tag1,tag2",
+            "citation_title": "Pain affect in the absence of pain sensation",
+            "citation_authors": "Uhelski et al.",
+            "citation_year": "2012",
+            "citation_journal": "PAIN",
+            "citation_doi": "10.1016/j.pain.2012.01.012",
+            "citation_url": "https://doi.org/10.1016/j.pain.2012.01.012",
+        },
     )
     assert resp.status_code == 200
     item = resp.json()["item"]
     assert item["title"] == "New Title"
     assert item["folder"] == "wk3"
     assert item["tags"] == "tag1,tag2"
+    assert item["citation_title"] == "Pain affect in the absence of pain sensation"
+    assert item["citation_authors"] == "Uhelski et al."
+    assert item["citation_year"] == "2012"
+    assert item["citation_journal"] == "PAIN"
+    assert item["citation_doi"] == "10.1016/j.pain.2012.01.012"
+    assert item["citation_url"] == "https://doi.org/10.1016/j.pain.2012.01.012"
 
 
 def test_chat_stream_uses_selected_library_ids_as_pinned_context(tmp_path: Path, monkeypatch) -> None:
@@ -147,6 +165,62 @@ def test_chat_stream_uses_selected_library_ids_as_pinned_context(tmp_path: Path,
     assert any((s.get("kind") == "library_selected") for s in src_events[0].get("sources", []))
 
 
+def test_chat_stream_pinned_only_mode_skips_semantic_retrieval(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setattr(ui_app, "SOURCE_DIR", str(tmp_path / "sources"))
+    ui_app.CHAT_HISTORY.clear()
+    owner = "bio777"
+
+    source_id = "src1"
+    text_path = source_store.write_text_blob(owner, source_id, "Pinned context body about asomaesthesia.", str(tmp_path / "sources"))
+    source_store.add_item(
+        owner,
+        {
+            "id": source_id,
+            "title": "Pinned Source",
+            "kind": "note",
+            "text_path": text_path,
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        str(tmp_path / "sources"),
+    )
+
+    def _embed_should_not_run(_texts):
+        raise AssertionError("embed_texts should not run in pinned_only mode")
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            raise AssertionError("db.query should not run in pinned_only mode")
+
+    monkeypatch.setattr(ui_app, "embed_texts", _embed_should_not_run)
+    monkeypatch.setattr(ui_app, "db", _DB())
+    monkeypatch.setattr(
+        ui_app,
+        "_run_generate",
+        lambda provider, prompt, model, thinking_enabled=False, thinking_level="medium": "Pinned only answer.",
+    )
+
+    client = _authed_client(monkeypatch)
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": owner,
+            "message": "What is asomaesthesia?",
+            "mode": "study_guide",
+            "provider": "claude_code",
+            "selected_library_ids": source_id,
+            "retrieval_mode": "pinned_only",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    assert any(e.get("type") == "delta" and "Pinned only answer." in e.get("text", "") for e in events)
+    src_events = [e for e in events if e.get("type") == "sources"]
+    assert src_events
+    assert any((s.get("kind") == "library_selected") for s in src_events[0].get("sources", []))
+
+
 def test_session_delete_optionally_deletes_linked_library_items(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
     monkeypatch.setattr(ui_app, "SOURCE_DIR", str(tmp_path / "sources"))
@@ -193,6 +267,92 @@ def test_session_delete_optionally_deletes_linked_library_items(tmp_path: Path, 
     assert payload["deleted_library_count"] == 1
     assert source_store.get_item(owner, "sid1", base) is None
     assert "c1" in fake_db.deleted_ids and "c2" in fake_db.deleted_ids
+
+
+def test_library_batch_mutation_supports_partial_failure(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SOURCE_DIR", str(tmp_path / "sources"))
+
+    class _DB:
+        def __init__(self):
+            self.deleted_ids = []
+
+        def delete(self, ids):
+            self.deleted_ids.extend(ids or [])
+
+    fake_db = _DB()
+    monkeypatch.setattr(ui_app, "db", fake_db)
+
+    owner = "bio101"
+    base = str(tmp_path / "sources")
+    text_a = source_store.write_text_blob(owner, "a1", "alpha", base)
+    source_store.add_item(
+        owner,
+        {
+            "id": "a1",
+            "title": "A1",
+            "kind": "note",
+            "text_path": text_a,
+            "chunk_ids": ["c-a1-1"],
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        base,
+    )
+    text_b = source_store.write_text_blob(owner, "b1", "beta", base)
+    source_store.add_item(
+        owner,
+        {
+            "id": "b1",
+            "title": "B1",
+            "kind": "note",
+            "text_path": text_b,
+            "chunk_ids": ["c-b1-1"],
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+        base,
+    )
+
+    client = _authed_client(monkeypatch)
+    resp = client.post(
+        "/chat/library/batch",
+        json={
+            "owner": owner,
+            "operations": [
+                {"op": "update", "item_id": "a1", "title": "A1 Updated", "folder": "wk1", "tags": "tag1"},
+                {"op": "delete", "item_id": "missing"},
+                {"op": "delete", "item_id": "b1"},
+            ],
+        },
+    )
+    assert resp.status_code == 207
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["partial_failure"] is True
+    assert payload["summary"] == {
+        "total": 3,
+        "succeeded": 2,
+        "failed": 1,
+        "updated": 1,
+        "deleted": 1,
+    }
+    assert payload["results"][0]["ok"] is True
+    assert payload["results"][0]["item"]["title"] == "A1 Updated"
+    assert payload["results"][1]["ok"] is False
+    assert payload["results"][1]["error"] == "not_found"
+    assert payload["results"][2]["ok"] is True
+    assert payload["results"][2]["op"] == "delete"
+
+    updated = source_store.get_item(owner, "a1", base)
+    assert updated is not None
+    assert updated["title"] == "A1 Updated"
+    assert source_store.get_item(owner, "b1", base) is None
+    assert "c-b1-1" in fake_db.deleted_ids
+
+
+def test_library_batch_mutation_rejects_invalid_payload(monkeypatch) -> None:
+    client = _authed_client(monkeypatch)
+    resp = client.post("/chat/library/batch", json={"owner": "bio101", "operations": []})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "operations_required"
 
 
 def test_library_pdf_preview_endpoint_serves_inline_pdf(tmp_path: Path, monkeypatch) -> None:
