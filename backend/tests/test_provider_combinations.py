@@ -224,6 +224,28 @@ def test_ui_run_generate_falls_back_from_codex_to_openai(monkeypatch) -> None:
     assert out == "openai-fallback"
 
 
+def test_ui_run_generate_result_reports_fallback_from_codex(monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "codex_cli_available", lambda: False)
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.setattr(ui_app, "generate_with_openai", lambda prompt, model=None: "openai-fallback")
+
+    result = ui_app._run_generate_result("codex", "hello", model="")
+
+    assert result["text"] == "openai-fallback"
+    assert result["provider_used"] == "openai"
+    assert result["fallback_used"] is True
+    assert any("Falling back from Codex CLI" in d for d in result["diagnostics"])
+
+
+def test_ui_run_generate_result_prefers_requested_provider_without_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "generate_with_openai", lambda prompt, model=None: "direct-openai")
+    result = ui_app._run_generate_result("openai", "hello", model="")
+
+    assert result["text"] == "direct-openai"
+    assert result["provider_used"] == "openai"
+    assert result["fallback_used"] is False
+
+
 def test_cli_run_generate_falls_back_from_codex_to_openai(monkeypatch) -> None:
     cfg = cli_chat.ChatConfig(provider="codex", model="")
     monkeypatch.setattr(cli_chat, "codex_cli_available", lambda: False)
