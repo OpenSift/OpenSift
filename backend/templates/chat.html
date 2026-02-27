@@ -336,6 +336,16 @@
                 <option value="key_points">Key Points</option>
                 <option value="quiz">Quiz</option>
               </select>
+              <select id="retrievalMode">
+                <option value="semantic_plus_pinned" selected>Retrieval: Semantic + Pinned</option>
+                <option value="semantic_only">Retrieval: Semantic Only</option>
+                <option value="pinned_only">Retrieval: Pinned Only</option>
+              </select>
+              <select id="retrievalDepth">
+                <option value="fast">Depth: Fast</option>
+                <option value="balanced" selected>Depth: Balanced</option>
+                <option value="deep">Depth: Deep</option>
+              </select>
               <select id="provider">
                 <option value="claude_code" {% if preferred_provider == "claude_code" %}selected{% endif %} {% if not provider_caps.claude_code_ready %}disabled{% endif %}>
                   Claude Code{% if not provider_caps.claude_code_cli_available and provider_caps.anthropic_api_key_set %} (Claude API fallback){% elif not provider_caps.claude_code_ready %} (unavailable in container){% endif %}
@@ -421,6 +431,8 @@
       const ownerLabel = document.getElementById("ownerLabel");
       const msgEl = document.getElementById("msg");
       const modeEl = document.getElementById("mode");
+      const retrievalModeEl = document.getElementById("retrievalMode");
+      const retrievalDepthEl = document.getElementById("retrievalDepth");
       const providerEl = document.getElementById("provider");
       const kEl = document.getElementById("k");
       const modelEl = document.getElementById("model");
@@ -570,9 +582,24 @@
           const label = document.createElement("span");
           const sourceName = (src.source || "source").toString();
           const kind = (src.kind || "").toString();
+          const num = Number(src.n || (i + 1));
+          const marker = (src.label || `[${num}]`).toString();
           const dist = src.distance === null || src.distance === undefined ? "" : ` · score ${Number(src.distance).toFixed(3)}`;
-          label.textContent = `[${i + 1}] ${sourceName}${kind ? ` (${kind})` : ""}${dist}`;
+          label.textContent = `${marker} ${sourceName}${kind ? ` (${kind})` : ""}${dist}`;
           line.appendChild(label);
+          const sourceId = (src.source_id || "").toString().trim();
+          const sourceOwner = (src.owner || owner()).toString().trim();
+          if (sourceId) {
+            const sep = document.createElement("span");
+            sep.textContent = " — ";
+            line.appendChild(sep);
+            const preview = document.createElement("a");
+            preview.href = `/chat/library/preview?owner=${encodeURIComponent(owner())}&item_owner=${encodeURIComponent(sourceOwner)}&item_id=${encodeURIComponent(sourceId)}`;
+            preview.target = "_blank";
+            preview.rel = "noopener noreferrer";
+            preview.textContent = "open source";
+            line.appendChild(preview);
+          }
           const url = (src.url || "").toString().trim();
           if (url) {
             const sep = document.createElement("span");
@@ -617,7 +644,7 @@
         for (const m of messages || []) {
           const b = addBubble(m.role || "assistant", m.text || "", m.ts || "");
           if ((m.role || "") === "assistant") {
-            renderReferences(b.refsEl, m.sources || []);
+            renderReferences(b.refsEl, m.citations || m.sources || []);
           }
         }
       }
@@ -663,6 +690,8 @@
         form.append("provider", normalized.provider || providerEl.value);
         form.append("k", kEl.value);
         form.append("model", normalized.model);
+        form.append("retrieval_mode", retrievalModeEl.value || "semantic_plus_pinned");
+        form.append("retrieval_depth", retrievalDepthEl.value || "balanced");
         form.append("thinking_enabled", thinkingEnabledEl.checked ? "true" : "false");
         form.append("thinking_level", thinkingLevelEl.value || "medium");
         form.append("show_thinking", showThinkingEl.checked ? "true" : "false");
@@ -705,6 +734,10 @@
               if (evt.type === "sources") {
                 latestSources = Array.isArray(evt.sources) ? evt.sources : [];
                 renderReferences(a.refsEl, latestSources);
+              }
+              if (evt.type === "citations") {
+                const citations = Array.isArray(evt.citations) ? evt.citations : [];
+                renderReferences(a.refsEl, citations.length ? citations : latestSources);
               }
               if (evt.type === "status" && showThinkingEl.checked) {
                 statusEl.textContent = evt.text || "";
