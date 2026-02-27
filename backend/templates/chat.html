@@ -145,7 +145,7 @@
         gap: 9px;
         background: linear-gradient(180deg, #fafbfd, #f5f7fb);
       }
-      .controls { display: grid; grid-template-columns: 1fr 1fr .7fr 1.2fr 120px; gap: 8px; }
+      .controls { display: grid; grid-template-columns: 1fr 1fr .7fr 1fr 1.2fr 120px; gap: 8px; }
       .toggle-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
       .toggle-row label { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
       .toggle-row input { width: auto; }
@@ -361,6 +361,11 @@
                 </option>
               </select>
               <input id="k" type="number" value="8" min="1" max="20" />
+              <select id="retrievalMode">
+                <option value="semantic_plus_pinned" selected>Retrieval: Semantic + Pinned</option>
+                <option value="semantic_only">Retrieval: Semantic only</option>
+                <option value="pinned_only">Retrieval: Pinned only</option>
+              </select>
               <select id="model">
                 <option value="" selected>Auto model</option>
                 {% for m in supported_claude_models %}
@@ -435,6 +440,7 @@
       const retrievalDepthEl = document.getElementById("retrievalDepth");
       const providerEl = document.getElementById("provider");
       const kEl = document.getElementById("k");
+      const retrievalModeEl = document.getElementById("retrievalMode");
       const modelEl = document.getElementById("model");
       const thinkingEnabledEl = document.getElementById("thinkingEnabled");
       const thinkingLevelEl = document.getElementById("thinkingLevel");
@@ -513,6 +519,10 @@
         return `opensift_selected_library::${owner()}`;
       }
 
+      function retrievalModeKey() {
+        return `opensift_retrieval_mode::${owner()}`;
+      }
+
       function loadSelectedLibraryIds() {
         try {
           const raw = localStorage.getItem(selectedLibraryKey()) || "[]";
@@ -527,6 +537,16 @@
       function saveSelectedLibraryIds() {
         localStorage.setItem(selectedLibraryKey(), JSON.stringify(selectedLibraryIds.slice(0, 8)));
         renderSelectedLibraryStatus();
+      }
+
+      function loadRetrievalMode() {
+        const raw = (localStorage.getItem(retrievalModeKey()) || "").trim();
+        const allowed = new Set(["semantic_plus_pinned", "semantic_only", "pinned_only"]);
+        retrievalModeEl.value = allowed.has(raw) ? raw : "semantic_plus_pinned";
+      }
+
+      function saveRetrievalMode() {
+        localStorage.setItem(retrievalModeKey(), retrievalModeEl.value || "semantic_plus_pinned");
       }
 
       function renderSelectedLibraryStatus() {
@@ -689,6 +709,7 @@
         const normalized = normalizeProviderAndModel(providerEl.value, modelEl.value);
         form.append("provider", normalized.provider || providerEl.value);
         form.append("k", kEl.value);
+        form.append("retrieval_mode", retrievalModeEl.value || "semantic_plus_pinned");
         form.append("model", normalized.model);
         form.append("retrieval_mode", retrievalModeEl.value || "semantic_plus_pinned");
         form.append("retrieval_depth", retrievalDepthEl.value || "balanced");
@@ -735,12 +756,8 @@
                 latestSources = Array.isArray(evt.sources) ? evt.sources : [];
                 renderReferences(a.refsEl, latestSources);
               }
-              if (evt.type === "citations") {
-                const citations = Array.isArray(evt.citations) ? evt.citations : [];
-                renderReferences(a.refsEl, citations.length ? citations : latestSources);
-              }
-              if (evt.type === "status" && showThinkingEl.checked) {
-                statusEl.textContent = evt.text || "";
+              if (evt.type === "status") {
+                if (showThinkingEl.checked) statusEl.textContent = evt.text || "";
                 pushStatus(evt.text || "");
               }
               if (evt.type === "error") {
@@ -1420,6 +1437,7 @@
       ownerEl.addEventListener("change", async () => {
         owner();
         loadSelectedLibraryIds();
+        loadRetrievalMode();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(owner())}`);
         if (!(await ensureAuth(res))) return;
         if (res.ok) {
@@ -1434,9 +1452,11 @@
           sendStream();
         }
       });
+      retrievalModeEl.addEventListener("change", saveRetrievalMode);
 
       owner();
       loadSelectedLibraryIds();
+      loadRetrievalMode();
       scrollToBottom();
       loadSessions();
       loadFlashcards();

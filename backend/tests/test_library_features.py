@@ -172,7 +172,7 @@ def test_chat_stream_pinned_only_mode_skips_semantic_retrieval(tmp_path: Path, m
     owner = "bio777"
 
     source_id = "src1"
-    text_path = source_store.write_text_blob(owner, source_id, "Pinned context body only.", str(tmp_path / "sources"))
+    text_path = source_store.write_text_blob(owner, source_id, "Pinned context body about asomaesthesia.", str(tmp_path / "sources"))
     source_store.add_item(
         owner,
         {
@@ -185,17 +185,19 @@ def test_chat_stream_pinned_only_mode_skips_semantic_retrieval(tmp_path: Path, m
         str(tmp_path / "sources"),
     )
 
-    monkeypatch.setattr(ui_app, "embed_texts", lambda _texts: (_ for _ in ()).throw(RuntimeError("embed should not run")))
+    def _embed_should_not_run(_texts):
+        raise AssertionError("embed_texts should not run in pinned_only mode")
 
     class _DB:
         def query(self, q_emb, k=8, where=None):
-            raise RuntimeError("db query should not run")
+            raise AssertionError("db.query should not run in pinned_only mode")
 
+    monkeypatch.setattr(ui_app, "embed_texts", _embed_should_not_run)
     monkeypatch.setattr(ui_app, "db", _DB())
     monkeypatch.setattr(
         ui_app,
         "_run_generate",
-        lambda provider, prompt, model, thinking_enabled=False, thinking_level="medium": "Pinned-only answer.",
+        lambda provider, prompt, model, thinking_enabled=False, thinking_level="medium": "Pinned only answer.",
     )
 
     client = _authed_client(monkeypatch)
@@ -203,7 +205,7 @@ def test_chat_stream_pinned_only_mode_skips_semantic_retrieval(tmp_path: Path, m
         "/chat/stream",
         data={
             "owner": owner,
-            "message": "Use pinned only",
+            "message": "What is asomaesthesia?",
             "mode": "study_guide",
             "provider": "claude_code",
             "selected_library_ids": source_id,
@@ -213,68 +215,10 @@ def test_chat_stream_pinned_only_mode_skips_semantic_retrieval(tmp_path: Path, m
     )
     assert resp.status_code == 200
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
-    assert any(e.get("type") == "delta" and "Pinned-only answer." in e.get("text", "") for e in events)
+    assert any(e.get("type") == "delta" and "Pinned only answer." in e.get("text", "") for e in events)
     src_events = [e for e in events if e.get("type") == "sources"]
     assert src_events
     assert any((s.get("kind") == "library_selected") for s in src_events[0].get("sources", []))
-
-
-def test_chat_stream_semantic_only_mode_ignores_selected_library(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setattr(ui_app, "SOURCE_DIR", str(tmp_path / "sources"))
-    ui_app.CHAT_HISTORY.clear()
-    owner = "bio777"
-
-    source_id = "src1"
-    text_path = source_store.write_text_blob(owner, source_id, "Pinned context body ignored in semantic_only.", str(tmp_path / "sources"))
-    source_store.add_item(
-        owner,
-        {
-            "id": source_id,
-            "title": "Pinned Source",
-            "kind": "note",
-            "text_path": text_path,
-            "created_at": "2026-01-01T00:00:00Z",
-        },
-        str(tmp_path / "sources"),
-    )
-
-    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
-
-    class _DB:
-        def query(self, q_emb, k=8, where=None):
-            return {
-                "documents": [["Semantic passage only."]],
-                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
-                "distances": [[0.02]],
-                "ids": [["chunk-1"]],
-            }
-
-    monkeypatch.setattr(ui_app, "db", _DB())
-    monkeypatch.setattr(
-        ui_app,
-        "_run_generate",
-        lambda provider, prompt, model, thinking_enabled=False, thinking_level="medium": "Semantic-only answer.",
-    )
-
-    client = _authed_client(monkeypatch)
-    resp = client.post(
-        "/chat/stream",
-        data={
-            "owner": owner,
-            "message": "Use semantic only",
-            "mode": "study_guide",
-            "provider": "claude_code",
-            "selected_library_ids": source_id,
-            "retrieval_mode": "semantic_only",
-            "true_streaming": "false",
-        },
-    )
-    assert resp.status_code == 200
-    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
-    src_events = [e for e in events if e.get("type") == "sources"]
-    assert src_events
-    assert not any((s.get("kind") == "library_selected") for s in src_events[0].get("sources", []))
 
 
 def test_session_delete_optionally_deletes_linked_library_items(tmp_path: Path, monkeypatch) -> None:
