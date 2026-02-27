@@ -68,6 +68,7 @@ from study_store import (
 from quiz_store import DEFAULT_DIR as QUIZ_DIR, add_attempt, delete_attempt, load_attempts
 from flashcard_store import DEFAULT_DIR as FLASHCARD_DIR, add_card, delete_card, due_cards, load_cards, review_card
 from source_store import (
+    batch_mutate_items as batch_mutate_source_items,
     DEFAULT_DIR as SOURCE_DIR,
     add_item as add_source_item,
     delete_item as delete_source_item,
@@ -2446,6 +2447,153 @@ async def library_update(
         item = dict(item)
         item["owner"] = effective_owner
     return JSONResponse({"ok": True, "owner": effective_owner, "item": item})
+
+
+@app.post("/chat/library/batch")
+async def library_batch(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "invalid_payload"}, status_code=400)
+
+    owner = _normalize_owner(str(payload.get("owner") or "default"))
+    default_item_owner = _normalize_owner(str(payload.get("item_owner") or owner))
+    operations = payload.get("operations")
+    if not isinstance(operations, list) or not operations:
+        return JSONResponse({"ok": False, "error": "operations_required"}, status_code=400)
+    if len(operations) > 200:
+        return JSONResponse({"ok": False, "error": "too_many_operations"}, status_code=400)
+
+    indexed_results: List[Dict[str, Any]] = []
+    op_groups: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
+
+    for idx, raw in enumerate(operations):
+        if not isinstance(raw, dict):
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "op": "unknown",
+                    "owner": default_item_owner,
+                    "item_id": "",
+                    "error": "invalid_operation",
+                }
+            )
+            continue
+
+        op = str(raw.get("op") or "").strip().lower()
+        item_id = str(raw.get("item_id") or "").strip()
+        op_owner = _normalize_owner(str(raw.get("item_owner") or default_item_owner))
+
+        if op not in ("update", "delete"):
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "op": op or "unknown",
+                    "owner": op_owner,
+                    "item_id": item_id,
+                    "error": "invalid_op",
+                }
+            )
+            continue
+
+        if not item_id:
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "op": op,
+                    "owner": op_owner,
+                    "item_id": item_id,
+                    "error": "item_id_required",
+                }
+            )
+            continue
+
+        canonical: Dict[str, Any] = {"op": op, "item_id": item_id}
+        if op == "update":
+            canonical["patch"] = {
+                "title": str(raw.get("title") or "").strip(),
+                "folder": str(raw.get("folder") or "").strip(),
+                "tags": str(raw.get("tags") or "").strip(),
+            }
+        op_groups[op_owner].append((idx, canonical))
+
+    # Execute owner groups with in-order results.
+    for op_owner, entries in op_groups.items():
+        owner_ops = [entry[1] for entry in entries]
+        owner_results = batch_mutate_source_items(op_owner, owner_ops, SOURCE_DIR)
+        for (idx, canonical), res in zip(entries, owner_results):
+            op = str(canonical.get("op") or "")
+            item_id = str(canonical.get("item_id") or "")
+            if not res.get("ok"):
+                indexed_results.append(
+                    {
+                        "index": idx,
+                        "ok": False,
+                        "op": op,
+                        "owner": op_owner,
+                        "item_id": item_id,
+                        "error": str(res.get("error") or "unknown_error"),
+                    }
+                )
+                continue
+
+            item = res.get("item") if isinstance(res.get("item"), dict) else {}
+            if op == "delete":
+                chunk_ids = [x for x in (item.get("chunk_ids") or []) if isinstance(x, str)]
+                if chunk_ids:
+                    try:
+                        await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
+                    except Exception:
+                        logger.exception("library_batch_delete_vector_chunks_failed owner=%s item_id=%s", op_owner, item_id)
+                remove_source_file(str(item.get("binary_path") or ""))
+                remove_source_file(str(item.get("text_path") or ""))
+
+            if item and not item.get("owner"):
+                item = dict(item)
+                item["owner"] = op_owner
+
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": True,
+                    "op": op,
+                    "owner": op_owner,
+                    "item_id": item_id,
+                    "item": item,
+                }
+            )
+
+    indexed_results.sort(key=lambda x: int(x.get("index") or 0))
+    total = len(indexed_results)
+    failed = sum(1 for r in indexed_results if not r.get("ok"))
+    succeeded = total - failed
+    updated = sum(1 for r in indexed_results if r.get("ok") and r.get("op") == "update")
+    deleted = sum(1 for r in indexed_results if r.get("ok") and r.get("op") == "delete")
+    partial = succeeded > 0 and failed > 0
+
+    status = 207 if failed else 200
+    return JSONResponse(
+        {
+            "ok": failed == 0,
+            "owner": owner,
+            "partial_failure": partial,
+            "summary": {
+                "total": total,
+                "succeeded": succeeded,
+                "failed": failed,
+                "updated": updated,
+                "deleted": deleted,
+            },
+            "results": indexed_results,
+        },
+        status_code=status,
+    )
 
 
 @app.get("/chat/library/download")
