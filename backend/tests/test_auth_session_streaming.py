@@ -107,11 +107,16 @@ def test_chat_stream_returns_done_and_persists_messages(tmp_path: Path, monkeypa
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     assert any(e.get("type") == "done" for e in events)
     assert any(e.get("type") == "delta" and "Generated answer." in e.get("text", "") for e in events)
+    cit_events = [e for e in events if e.get("type") == "citations"]
+    assert cit_events
+    assert cit_events[0]["citations"][0]["label"] == "[1]"
 
     exported = client.get("/chat/session/export", params={"owner": "bob"}).json()["history"]
     assert len(exported) == 2
     assert exported[0]["role"] == "user"
     assert exported[1]["role"] == "assistant"
+    assert isinstance(exported[1].get("citations"), list)
+    assert exported[1]["citations"][0]["label"] == "[1]"
 
 
 def test_chat_stream_hides_status_and_uses_buffered_mode(tmp_path: Path, monkeypatch) -> None:

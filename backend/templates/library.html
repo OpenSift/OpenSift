@@ -526,11 +526,23 @@
           <div class="panel-meta">Filename: ${escapeHtml(item.original_name || "")}</div>
           <div class="panel-meta">Folder: ${escapeHtml(item.folder || "(none)")}</div>
           <div class="panel-meta">Tags: ${escapeHtml(item.tags || "(none)")}</div>
+          <div class="panel-meta">Citation title: ${escapeHtml(item.citation_title || "(none)")}</div>
+          <div class="panel-meta">Citation authors: ${escapeHtml(item.citation_authors || "(none)")}</div>
+          <div class="panel-meta">Citation year: ${escapeHtml(item.citation_year || "(none)")}</div>
+          <div class="panel-meta">Citation journal: ${escapeHtml(item.citation_journal || "(none)")}</div>
+          <div class="panel-meta">Citation DOI: ${escapeHtml(item.citation_doi || "(none)")}</div>
+          <div class="panel-meta">Citation URL: ${escapeHtml(item.citation_url || "(none)")}</div>
           <div class="panel-meta">Text chars: ${Number(item.text_chars || 0)} · Chunks: ${Number(item.chunk_count || 0)}</div>
           <div style="display:grid; gap:8px; margin-top:10px;">
             <input id="editTitle" value="${escapeHtml(item.title || "")}" placeholder="Title" />
             <input id="editFolder" value="${escapeHtml(item.folder || "")}" placeholder="Folder" />
             <input id="editTags" value="${escapeHtml(item.tags || "")}" placeholder="Tags (comma-separated)" />
+            <input id="editCitationTitle" value="${escapeHtml(item.citation_title || "")}" placeholder="Citation title" />
+            <input id="editCitationAuthors" value="${escapeHtml(item.citation_authors || "")}" placeholder="Citation authors" />
+            <input id="editCitationYear" value="${escapeHtml(item.citation_year || "")}" placeholder="Citation year" />
+            <input id="editCitationJournal" value="${escapeHtml(item.citation_journal || "")}" placeholder="Citation journal" />
+            <input id="editCitationDoi" value="${escapeHtml(item.citation_doi || "")}" placeholder="Citation DOI" />
+            <input id="editCitationUrl" value="${escapeHtml(item.citation_url || "")}" placeholder="Citation URL" />
             <button id="saveMetaBtn" type="button">Save Metadata</button>
           </div>
           <div style="display:flex; gap:8px; margin-top:10px;">
@@ -570,6 +582,12 @@
           form.append("title", (document.getElementById("editTitle").value || "").trim());
           form.append("folder", (document.getElementById("editFolder").value || "").trim());
           form.append("tags", (document.getElementById("editTags").value || "").trim());
+          form.append("citation_title", (document.getElementById("editCitationTitle").value || "").trim());
+          form.append("citation_authors", (document.getElementById("editCitationAuthors").value || "").trim());
+          form.append("citation_year", (document.getElementById("editCitationYear").value || "").trim());
+          form.append("citation_journal", (document.getElementById("editCitationJournal").value || "").trim());
+          form.append("citation_doi", (document.getElementById("editCitationDoi").value || "").trim());
+          form.append("citation_url", (document.getElementById("editCitationUrl").value || "").trim());
           const res = await csrfFetch("/chat/library/update", { method: "POST", body: form });
           if (!(await ensureAuth(res))) return;
           const data = await res.json().catch(() => ({}));
