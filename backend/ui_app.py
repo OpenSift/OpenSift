@@ -2917,6 +2917,29 @@ async def chat_stream(
 
         assistant_text = ""
 
+        async def _generate_once(gen_provider: str, gen_model: str) -> Tuple[str, List[str]]:
+            result = await _run_generate_resilient_result(
+                request,
+                gen_provider,
+                prompt,
+                gen_model,
+                thinking_enabled=thinking_enabled,
+                thinking_level=thinking_level,
+            )
+            statuses: List[str] = []
+            if show_thinking:
+                expected_provider = (gen_provider or "").strip().lower()
+                expected_model = (gen_model or "").strip()
+                used_provider = str(result.get("provider_used") or expected_provider or "auto").strip().lower()
+                used_model = str(result.get("model_used") or expected_model or "").strip()
+                if used_provider != expected_provider or (used_model and expected_model and used_model != expected_model):
+                    statuses.append(f"Generation fallback in use: {used_provider} / {(used_model or 'auto')}")
+                for d in list(result.get("diagnostics") or [])[-3:]:
+                    diag = (str(d) if d is not None else "").strip()
+                    if diag:
+                        statuses.append(f"Provider: {diag}")
+            return str(result.get("text") or ""), statuses
+
         # True streaming where possible, fallback otherwise
         try:
             p = (provider or "").strip().lower()
@@ -2929,25 +2952,15 @@ async def chat_stream(
                             assistant_text += delta
                             yield _ndjson({"type": "delta", "text": delta})
                     except Exception:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         yield _ndjson({"type": "delta", "text": assistant_text})
                 else:
-                    text = await _run_generate_resilient(
-                        request,
-                        p,
-                        prompt,
-                        m,
-                        thinking_enabled=thinking_enabled,
-                        thinking_level=thinking_level,
-                    )
+                    text, statuses = await _generate_once(p, m)
+                    for s in statuses:
+                        yield _ndjson({"type": "status", "text": s})
                     assistant_text = text
                     for i in range(0, len(assistant_text), 80):
                         yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -2966,25 +2979,15 @@ async def chat_stream(
                             assistant_text += delta
                             yield _ndjson({"type": "delta", "text": delta})
                     except Exception:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         yield _ndjson({"type": "delta", "text": assistant_text})
                 else:
-                    text = await _run_generate_resilient(
-                        request,
-                        p,
-                        prompt,
-                        m,
-                        thinking_enabled=thinking_enabled,
-                        thinking_level=thinking_level,
-                    )
+                    text, statuses = await _generate_once(p, m)
+                    for s in statuses:
+                        yield _ndjson({"type": "status", "text": s})
                     assistant_text = text
                     for i in range(0, len(assistant_text), 80):
                         yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -3002,25 +3005,15 @@ async def chat_stream(
                                 assistant_text += delta
                                 yield _ndjson({"type": "delta", "text": delta})
                         except Exception:
-                            text = await _run_generate_resilient(
-                                request,
-                                p,
-                                prompt,
-                                m,
-                                thinking_enabled=thinking_enabled,
-                                thinking_level=thinking_level,
-                            )
+                            text, statuses = await _generate_once(p, m)
+                            for s in statuses:
+                                yield _ndjson({"type": "status", "text": s})
                             assistant_text = text
                             yield _ndjson({"type": "delta", "text": assistant_text})
                     else:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         for i in range(0, len(assistant_text), 80):
                             yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -3032,25 +3025,15 @@ async def chat_stream(
                                 assistant_text += delta
                                 yield _ndjson({"type": "delta", "text": delta})
                         except Exception:
-                            text = await _run_generate_resilient(
-                                request,
-                                p,
-                                prompt,
-                                m,
-                                thinking_enabled=thinking_enabled,
-                                thinking_level=thinking_level,
-                            )
+                            text, statuses = await _generate_once(p, m)
+                            for s in statuses:
+                                yield _ndjson({"type": "status", "text": s})
                             assistant_text = text
                             yield _ndjson({"type": "delta", "text": assistant_text})
                     else:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         for i in range(0, len(assistant_text), 80):
                             yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -3072,38 +3055,23 @@ async def chat_stream(
                                 assistant_text += delta
                                 yield _ndjson({"type": "delta", "text": delta})
                         except Exception:
-                            text = await _run_generate_resilient(
-                                request,
-                                p,
-                                prompt,
-                                m,
-                                thinking_enabled=thinking_enabled,
-                                thinking_level=thinking_level,
-                            )
+                            text, statuses = await _generate_once(p, m)
+                            for s in statuses:
+                                yield _ndjson({"type": "status", "text": s})
                             assistant_text = text
                             yield _ndjson({"type": "delta", "text": assistant_text})
                     else:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         for i in range(0, len(assistant_text), 80):
                             yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
                             await asyncio.sleep(0.01)
                 else:
-                    text = await _run_generate_resilient(
-                        request,
-                        p,
-                        prompt,
-                        m,
-                        thinking_enabled=thinking_enabled,
-                        thinking_level=thinking_level,
-                    )
+                    text, statuses = await _generate_once(p, m)
+                    for s in statuses:
+                        yield _ndjson({"type": "status", "text": s})
                     assistant_text = text
                     for i in range(0, len(assistant_text), 80):
                         yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -3112,14 +3080,9 @@ async def chat_stream(
             else:
                 # Others: fallback (UI will show chunked streaming)
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
-                text = await _run_generate_resilient(
-                    request,
-                    p,
-                    prompt,
-                    m,
-                    thinking_enabled=thinking_enabled,
-                    thinking_level=thinking_level,
-                )
+                text, statuses = await _generate_once(p, m)
+                for s in statuses:
+                    yield _ndjson({"type": "status", "text": s})
                 assistant_text = text
                 for i in range(0, len(assistant_text), 80):
                     yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})

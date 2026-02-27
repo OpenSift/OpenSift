@@ -255,3 +255,56 @@ def test_chat_stream_empty_generation_returns_fallback_text(tmp_path: Path, monk
     deltas = [e.get("text", "") for e in events if e.get("type") == "delta"]
     assert any("Generation returned empty output" in text for text in deltas)
     assert any(e.get("type") == "done" for e in events)
+
+
+def test_chat_stream_emits_provider_diagnostics_status_events(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        return {
+            "text": "Generated answer.",
+            "provider_requested": provider,
+            "provider_used": "openai",
+            "model_requested": model,
+            "model_used": "gpt-5.2",
+            "fallback_used": True,
+            "diagnostics": ["Falling back from Claude Code CLI to OpenAI API."],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "diag-owner",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "claude_code",
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
+    assert any("Generation fallback in use: openai / gpt-5.2" in s for s in statuses)
+    assert any("Provider: Falling back from Claude Code CLI to OpenAI API." in s for s in statuses)
