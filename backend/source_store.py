@@ -127,6 +127,62 @@ def update_item(owner: str, item_id: str, patch: Dict[str, Any], base_dir: str =
         return updated
 
 
+def batch_mutate_items(
+    owner: str,
+    operations: List[Dict[str, Any]],
+    base_dir: str = DEFAULT_DIR,
+) -> List[Dict[str, Any]]:
+    """
+    Apply ordered update/delete operations for one owner manifest.
+    Returns one result per operation in the same order:
+      - {"ok": True, "op": "...", "item_id": "...", "item": {...}}
+      - {"ok": False, "op": "...", "item_id": "...", "error": "..."}
+    """
+    out: List[Dict[str, Any]] = []
+    with _LOCK:
+        items = load_items(owner, base_dir)
+        changed = False
+
+        for raw in operations or []:
+            op = str((raw or {}).get("op") or "").strip().lower()
+            item_id = str((raw or {}).get("item_id") or "").strip()
+            if op not in ("update", "delete"):
+                out.append({"ok": False, "op": op or "unknown", "item_id": item_id, "error": "invalid_op"})
+                continue
+            if not item_id:
+                out.append({"ok": False, "op": op, "item_id": item_id, "error": "item_id_required"})
+                continue
+
+            idx = -1
+            for i, item in enumerate(items):
+                if item.get("id") == item_id:
+                    idx = i
+                    break
+            if idx < 0:
+                out.append({"ok": False, "op": op, "item_id": item_id, "error": "not_found"})
+                continue
+
+            if op == "delete":
+                removed = items.pop(idx)
+                changed = True
+                out.append({"ok": True, "op": op, "item_id": item_id, "item": removed})
+                continue
+
+            patch = (raw or {}).get("patch") or {}
+            if not isinstance(patch, dict):
+                out.append({"ok": False, "op": op, "item_id": item_id, "error": "invalid_patch"})
+                continue
+            merged = dict(items[idx])
+            merged.update(patch)
+            items[idx] = merged
+            changed = True
+            out.append({"ok": True, "op": op, "item_id": item_id, "item": merged})
+
+        if changed:
+            save_items(owner, items, base_dir)
+    return out
+
+
 def write_text_blob(owner: str, source_id: str, text: str, base_dir: str = DEFAULT_DIR) -> str:
     files_dir = _owner_files_dir(owner, base_dir)
     path = os.path.join(files_dir, f"{source_id}.txt")

@@ -107,11 +107,16 @@ def test_chat_stream_returns_done_and_persists_messages(tmp_path: Path, monkeypa
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     assert any(e.get("type") == "done" for e in events)
     assert any(e.get("type") == "delta" and "Generated answer." in e.get("text", "") for e in events)
+    cit_events = [e for e in events if e.get("type") == "citations"]
+    assert cit_events
+    assert cit_events[0]["citations"][0]["label"] == "[1]"
 
     exported = client.get("/chat/session/export", params={"owner": "bob"}).json()["history"]
     assert len(exported) == 2
     assert exported[0]["role"] == "user"
     assert exported[1]["role"] == "assistant"
+    assert isinstance(exported[1].get("citations"), list)
+    assert exported[1]["citations"][0]["label"] == "[1]"
 
 
 def test_chat_stream_hides_status_and_uses_buffered_mode(tmp_path: Path, monkeypatch) -> None:
@@ -308,3 +313,115 @@ def test_chat_stream_emits_provider_diagnostics_status_events(tmp_path: Path, mo
     statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
     assert any("Generation fallback in use: openai / gpt-5.2" in s for s in statuses)
     assert any("Provider: Falling back from Claude Code CLI to OpenAI API." in s for s in statuses)
+
+
+def test_chat_stream_status_uses_provider_model_when_unmodified(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+    monkeypatch.setattr(ui_app, "_resolve_provider_model_pair", lambda provider, model: (provider, model, ""))
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        return {
+            "text": "Generated answer.",
+            "provider_requested": provider,
+            "provider_used": provider,
+            "model_requested": model,
+            "model_used": (model or "").strip(),
+            "fallback_used": False,
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "status-direct",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "claude_code",
+            "model": "claude-sonnet-4-6",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
+    assert any("Using provider/model: claude_code / claude-sonnet-4-6" in s for s in statuses)
+
+
+def test_chat_stream_status_reports_requested_to_using_when_adjusted(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+    monkeypatch.setattr(
+        ui_app,
+        "_resolve_provider_model_pair",
+        lambda provider, model: ("openai", "gpt-5.2", ""),
+    )
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        return {
+            "text": "Generated answer.",
+            "provider_requested": "codex",
+            "provider_used": provider,
+            "model_requested": "auto",
+            "model_used": model,
+            "fallback_used": False,
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": "status-adjusted",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": "codex",
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
+    assert any("Requested provider/model: codex / auto -> using: openai / gpt-5.2" in s for s in statuses)

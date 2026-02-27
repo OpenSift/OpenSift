@@ -257,6 +257,37 @@ def _run_subprocess(args: List[str], stdin_text: str, timeout_s: int = 180, env:
     return (proc.stdout or "").strip()
 
 
+def _cli_output_looks_like_error(stdout: str, stderr: str = "") -> bool:
+    text = (stdout or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+    if low.startswith("error:"):
+        return True
+
+    # Claude/Codex CLIs can emit structured JSON with is_error=true while
+    # still exiting with 0 in some headless/incompatible invocations.
+    if text.startswith("{") and "\"is_error\"" in text:
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and bool(parsed.get("is_error", False)):
+                return True
+        except Exception:
+            # Fall through to substring heuristics.
+            if "\"is_error\":true" in low:
+                return True
+
+    if "\"subtype\":\"error_during_execution\"" in low:
+        return True
+    if "not inside a trusted directory" in low:
+        return True
+
+    err_low = (stderr or "").strip().lower()
+    if err_low.startswith("error:"):
+        return True
+    return False
+
+
 def _coerce_str(v: Any) -> str:
     return v.strip() if isinstance(v, str) else ""
 
@@ -407,6 +438,10 @@ def generate_with_claude_code(prompt: str, model: Optional[str] = None) -> str:
             detail = stderr or "no stdout produced"
             failures.append(f"{' '.join(args[:4])}... -> empty output ({detail[:220]})")
             continue
+        if _cli_output_looks_like_error(stdout, stderr):
+            detail = stdout or stderr or "structured error output"
+            failures.append(f"{' '.join(args[:4])}... -> error output ({detail[:220]})")
+            continue
         return stdout
 
     detail_blob = " | ".join(failures[-6:]) if failures else "unknown failure"
@@ -433,7 +468,10 @@ def generate_with_codex(prompt: str, model: Optional[str] = None) -> str:
     env = _codex_subprocess_env()
     for args in build_codex_cli_invocations(model=model):
         try:
-            return _run_subprocess(args, prompt, env=env)
+            out = _run_subprocess(args, prompt, env=env)
+            if _cli_output_looks_like_error(out, ""):
+                continue
+            return out
         except Exception:
             continue
     raise RuntimeError(

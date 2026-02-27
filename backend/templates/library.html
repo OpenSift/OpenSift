@@ -590,6 +590,12 @@
           <div class="panel-meta">Filename: ${escapeHtml(item.original_name || "")}</div>
           <div class="panel-meta">Folder: ${escapeHtml(item.folder || "(none)")}</div>
           <div class="panel-meta">Tags: ${escapeHtml(item.tags || "(none)")}</div>
+          <div class="panel-meta">Citation title: ${escapeHtml(item.citation_title || "(none)")}</div>
+          <div class="panel-meta">Citation authors: ${escapeHtml(item.citation_authors || "(none)")}</div>
+          <div class="panel-meta">Citation year: ${escapeHtml(item.citation_year || "(none)")}</div>
+          <div class="panel-meta">Citation journal: ${escapeHtml(item.citation_journal || "(none)")}</div>
+          <div class="panel-meta">Citation DOI: ${escapeHtml(item.citation_doi || "(none)")}</div>
+          <div class="panel-meta">Citation URL: ${escapeHtml(item.citation_url || "(none)")}</div>
           <div class="panel-meta">Text chars: ${Number(item.text_chars || 0)} · Chunks: ${Number(item.chunk_count || 0)}</div>
           <div style="display:grid; gap:8px; margin-top:10px;">
             <input id="editTitle" value="${escapeHtml(item.title || "")}" placeholder="Title" />
