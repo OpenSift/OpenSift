@@ -315,12 +315,13 @@ def test_chat_stream_emits_provider_diagnostics_status_events(tmp_path: Path, mo
     assert any("Provider: Falling back from Claude Code CLI to OpenAI API." in s for s in statuses)
 
 
-def test_chat_stream_emits_direct_streaming_status_for_openai(tmp_path: Path, monkeypatch) -> None:
+def test_chat_stream_status_uses_provider_model_when_unmodified(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
     ui_app.CHAT_HISTORY.clear()
     client = _authed_client(monkeypatch)
 
     monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+    monkeypatch.setattr(ui_app, "_resolve_provider_model_pair", lambda provider, model: (provider, model, ""))
 
     class _DB:
         def query(self, q_emb, k=8, where=None):
@@ -332,44 +333,95 @@ def test_chat_stream_emits_direct_streaming_status_for_openai(tmp_path: Path, mo
                 "ids": [["chunk-1"]],
             }
 
-    async def _fake_stream_openai(prompt: str, model: str):
-        yield "Generated answer."
-
     monkeypatch.setattr(ui_app, "db", _DB())
-    monkeypatch.setattr(ui_app, "_stream_openai", _fake_stream_openai)
+
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        return {
+            "text": "Generated answer.",
+            "provider_requested": provider,
+            "provider_used": provider,
+            "model_requested": model,
+            "model_used": (model or "").strip(),
+            "fallback_used": False,
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
 
     resp = client.post(
         "/chat/stream",
         data={
-            "owner": "stream-owner",
+            "owner": "status-direct",
             "message": "Explain this",
             "mode": "study_guide",
-            "provider": "openai",
-            "model": "",
+            "provider": "claude_code",
+            "model": "claude-sonnet-4-6",
             "k": "4",
             "history_turns": "5",
             "history_enabled": "true",
-            "true_streaming": "true",
+            "true_streaming": "false",
         },
     )
     assert resp.status_code == 200
 
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
-    assert any("Generation path: streaming via openai /" in s for s in statuses)
+    assert any("Using provider/model: claude_code / claude-sonnet-4-6" in s for s in statuses)
 
 
-def test_chat_stream_rejects_invalid_retrieval_mode(monkeypatch) -> None:
+def test_chat_stream_status_reports_requested_to_using_when_adjusted(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
     client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+    monkeypatch.setattr(
+        ui_app,
+        "_resolve_provider_model_pair",
+        lambda provider, model: ("openai", "gpt-5.2", ""),
+    )
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        return {
+            "text": "Generated answer.",
+            "provider_requested": "codex",
+            "provider_used": provider,
+            "model_requested": "auto",
+            "model_used": model,
+            "fallback_used": False,
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
+
     resp = client.post(
         "/chat/stream",
         data={
-            "owner": "bad-mode",
+            "owner": "status-adjusted",
             "message": "Explain this",
             "mode": "study_guide",
-            "provider": "claude_code",
-            "retrieval_mode": "not_a_mode",
+            "provider": "codex",
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "false",
         },
     )
-    assert resp.status_code == 400
-    assert resp.json().get("error") == "invalid_retrieval_mode"
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
+    assert any("Requested provider/model: codex / auto -> using: openai / gpt-5.2" in s for s in statuses)
