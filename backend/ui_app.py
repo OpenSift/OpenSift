@@ -2209,12 +2209,12 @@ def _library_index_text(
         "chunk_ids": ids,
         "folder": (folder or "").strip(),
         "tags": (tags or "").strip(),
-        "citation_title": (citation_title or "").strip(),
-        "citation_authors": (citation_authors or "").strip(),
-        "citation_year": (citation_year or "").strip(),
-        "citation_journal": (citation_journal or "").strip(),
-        "citation_doi": (citation_doi or "").strip(),
-        "citation_url": (citation_url or "").strip(),
+        "citation_title": "",
+        "citation_authors": "",
+        "citation_year": "",
+        "citation_journal": "",
+        "citation_doi": "",
+        "citation_url": "",
         "created_at": _now(),
     }
     add_source_item(owner, item, SOURCE_DIR)

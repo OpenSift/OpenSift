@@ -90,11 +90,11 @@ def test_library_update_metadata(tmp_path: Path, monkeypatch) -> None:
             "folder": "wk3",
             "tags": "tag1,tag2",
             "citation_title": "Pain affect in the absence of pain sensation",
-            "citation_authors": "Uhelski, Davis, Fuchs",
+            "citation_authors": "Uhelski et al.",
             "citation_year": "2012",
-            "citation_journal": "Pain",
-            "citation_doi": "10.1016/j.pain.2012.01.027",
-            "citation_url": "https://doi.org/10.1016/j.pain.2012.01.027",
+            "citation_journal": "PAIN",
+            "citation_doi": "10.1016/j.pain.2012.01.012",
+            "citation_url": "https://doi.org/10.1016/j.pain.2012.01.012",
         },
     )
     assert resp.status_code == 200
@@ -103,11 +103,11 @@ def test_library_update_metadata(tmp_path: Path, monkeypatch) -> None:
     assert item["folder"] == "wk3"
     assert item["tags"] == "tag1,tag2"
     assert item["citation_title"] == "Pain affect in the absence of pain sensation"
-    assert item["citation_authors"] == "Uhelski, Davis, Fuchs"
+    assert item["citation_authors"] == "Uhelski et al."
     assert item["citation_year"] == "2012"
-    assert item["citation_journal"] == "Pain"
-    assert item["citation_doi"] == "10.1016/j.pain.2012.01.027"
-    assert item["citation_url"] == "https://doi.org/10.1016/j.pain.2012.01.027"
+    assert item["citation_journal"] == "PAIN"
+    assert item["citation_doi"] == "10.1016/j.pain.2012.01.012"
+    assert item["citation_url"] == "https://doi.org/10.1016/j.pain.2012.01.012"
 
 
 def test_chat_stream_uses_selected_library_ids_as_pinned_context(tmp_path: Path, monkeypatch) -> None:
