@@ -3,1087 +3,196 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>OpenSift Library</title>
+    <title>OpenSift Library - {{ title }}</title>
     <style>
       :root {
-        --bg: #f3f5f8;
-        --panel: #ffffff;
-        --panel-2: #f7f8fb;
-        --text: #151a22;
-        --muted: #6c7586;
-        --line: #e4e8ef;
-        --brand: #5aa8ff;
-        --danger: #c13737;
+        --bg: #0b1020;
+        --panel: #121a30;
+        --text: #e9eefc;
+        --muted: #97a6c9;
+        --line: rgba(255, 255, 255, 0.12);
+        --warn-bg: rgba(214, 163, 58, 0.14);
+        --warn-line: rgba(214, 163, 58, 0.45);
+        --brand: #4f74ff;
       }
       * { box-sizing: border-box; }
-      html, body { height: 100%; }
       body {
         margin: 0;
+        background: radial-gradient(1100px 680px at -20% -20%, #2a3f81 0%, transparent 55%), linear-gradient(180deg, #080c16 0%, #0b1020 100%);
         color: var(--text);
-        font-family: "Manrope", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
-        background:
-          radial-gradient(900px 500px at -15% -20%, #e8f3ff 0%, transparent 60%),
-          radial-gradient(850px 500px at 120% -10%, #e6eefc 0%, transparent 58%),
-          linear-gradient(180deg, #f6f8fb 0%, #f1f4f8 100%);
+        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
       }
-      .app {
-        height: 100vh;
-        display: grid;
-        grid-template-columns: 340px 1fr;
+      .wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 18px;
       }
-      .sidebar {
-        border-right: 1px solid var(--line);
-        background: linear-gradient(180deg, #fdfdfe, #f7f9fc);
-        display: grid;
-        grid-template-rows: auto auto auto auto auto 1fr auto;
-        min-height: 0;
-      }
-      .section {
-        padding: 12px 14px;
-        border-bottom: 1px solid var(--line);
-      }
-      .brand { font-size: 17px; font-weight: 760; letter-spacing: .02em; }
-      .stack { display: grid; gap: 8px; }
-      .hint { font-size: 12px; color: var(--muted); }
-      .main {
-        min-width: 0;
-        display: grid;
-        grid-template-rows: auto auto 1fr;
-      }
-      .topbar {
-        border-bottom: 1px solid var(--line);
-        padding: 10px 14px;
+      .top {
         display: flex;
-        gap: 8px;
+        justify-content: space-between;
         align-items: center;
-        background: var(--panel);
+        gap: 10px;
+        margin-bottom: 12px;
       }
-      .filters {
-        border-bottom: 1px solid var(--line);
-        padding: 10px 14px;
-        display: grid;
-        grid-template-columns: 1fr 160px 160px 180px 100px 100px 140px;
-        gap: 8px;
+      .title {
+        font-size: 20px;
+        font-weight: 650;
       }
-      .presets {
-        border-bottom: 1px solid var(--line);
-        padding: 10px 14px;
-        display: grid;
-        grid-template-columns: 1fr 1fr auto auto auto;
-        gap: 8px;
-      }
-      .pagination {
-        border-top: 1px solid var(--line);
-        padding: 8px 14px;
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .content {
-        min-height: 0;
-        display: grid;
-        grid-template-columns: 380px 1fr;
-      }
-      .list-pane {
-        min-height: 0;
-        overflow: auto;
-        border-right: 1px solid var(--line);
-        padding: 10px;
-        display: grid;
-        gap: 8px;
-        align-content: start;
-      }
-      .item-card {
+      .muted { color: var(--muted); font-size: 12px; }
+      .card {
         border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 10px;
+        border-radius: 14px;
         background: var(--panel);
-        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
+        overflow: hidden;
       }
-      .item-title { font-weight: 600; font-size: 13px; }
-      .item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
-      .item-preview {
-        margin-top: 6px;
-        color: var(--muted);
-        font-size: 12px;
-        white-space: pre-wrap;
-      }
-      .item-actions {
-        margin-top: 8px;
+      .toolbar {
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
         display: flex;
-        gap: 6px;
+        gap: 8px;
         flex-wrap: wrap;
       }
-      .details {
-        min-height: 0;
-        overflow: auto;
-        padding: 14px;
-      }
-      .panel {
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 9px 11px;
+        border-radius: 10px;
         border: 1px solid var(--line);
+        color: var(--text);
+        text-decoration: none;
+        background: rgba(255,255,255,.04);
+      }
+      .btn.primary {
+        background: linear-gradient(180deg, #5a76ff, #4564ff);
+        border-color: var(--brand);
+      }
+      .preview {
+        position: relative;
+        min-height: 70vh;
+        background: rgba(0,0,0,.18);
+      }
+      .preview iframe {
+        width: 100%;
+        height: 72vh;
+        border: 0;
+        display: block;
+      }
+      .state {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 22px;
+        text-align: left;
+      }
+      .state.show { display: flex; }
+      .state-card {
+        max-width: 820px;
+        border: 1px solid var(--warn-line);
+        background: var(--warn-bg);
         border-radius: 12px;
-        padding: 12px;
-        background: var(--panel);
-        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
+        padding: 14px;
+        line-height: 1.45;
       }
-      .panel h3 { margin: 0 0 8px; font-size: 16px; }
-      .panel-meta { font-size: 12px; color: var(--muted); margin: 2px 0; }
-      .panel-text {
+      .state-title {
+        font-size: 16px;
+        font-weight: 650;
+        margin-bottom: 6px;
+      }
+      .state-actions {
         margin-top: 10px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 10px;
-        background: var(--panel-2);
-        white-space: pre-wrap;
-        line-height: 1.4;
-        max-height: 60vh;
-        overflow: auto;
-        font-size: 13px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
       }
-      .pdf-preview {
-        margin-top: 10px;
-        width: 100%;
-        height: min(72vh, 780px);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fff;
-      }
-      input, select, textarea, button { font: inherit; }
-      input, select, textarea {
-        width: 100%;
-        color: #1e2430;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fff;
-        padding: 9px 10px;
-      }
-      textarea { min-height: 100px; resize: vertical; }
-      button {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fff;
-        color: #1b2230;
-        padding: 8px 10px;
-        cursor: pointer;
-      }
-      button:hover { background: #f8fafc; }
-      button.primary { background: linear-gradient(180deg, #68b2ff, #4f9dff); border-color: #438fe7; color: #fff; }
-      button.danger { background: #fff1f1; border-color: #efb2b2; color: #9f2626; }
-      .out {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 9px;
-        white-space: pre-wrap;
-        font-size: 12px;
-        color: var(--muted);
-        background: var(--panel-2);
-      }
-      .pill {
-        font-size: 11px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 6px 10px;
-        color: var(--muted);
-        background: #fff;
-      }
-      @media (max-width: 1100px) {
-        .app { grid-template-columns: 1fr; }
-        .content { grid-template-columns: 1fr; }
-        .list-pane { border-right: none; border-bottom: 1px solid var(--line); max-height: 35vh; }
+      @media (max-width: 860px) {
+        .preview iframe { height: 66vh; }
       }
     </style>
   </head>
   <body data-csrf="{{ csrf_token }}">
-    <div class="app">
-      <aside class="sidebar">
-        <div class="section">
-          <div class="brand">OpenSift</div>
-          <div class="hint" style="margin-top:2px;">Gateway</div>
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <div class="title">{{ title }}</div>
+          <div class="muted">Owner: {{ owner }}</div>
+        </div>
+        <a class="btn" href="/chat?owner={{ owner | urlencode }}">Back to Chat</a>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          {% if has_pdf_url %}
+            <a id="openPdfBtn" class="btn primary" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener">Open PDF in New Tab</a>
+            <a id="downloadPdfBtn" class="btn" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener" download>Download PDF</a>
+          {% else %}
+            <span class="muted">No valid PDF URL provided.</span>
+          {% endif %}
         </div>
 
-        <div class="section stack">
-          <div class="hint">Owner</div>
-          <input id="owner" value="{{ owner }}" placeholder="bio101" />
-          <label class="hint"><input id="allOwnersToggle" type="checkbox" /> Browse all owners</label>
-          <input id="defaultFolder" placeholder="Default folder (optional)" />
-          <input id="defaultTags" placeholder="Default tags (comma-separated)" />
-          <div style="display:flex; gap:8px;">
-            <button id="goChatBtn" type="button" class="primary" style="width:100%;">Back To Chat</button>
-            <button id="refreshBtn" type="button" style="width:100%;">Refresh</button>
+        <div class="preview" id="previewRoot">
+          {% if has_pdf_url %}
+            <iframe id="pdfFrame" title="PDF preview" src="{{ pdf_url }}"></iframe>
+          {% endif %}
+
+          <div id="compatBanner" class="state{% if not has_pdf_url %} show{% endif %}">
+            <div class="state-card">
+              <div class="state-title">PDF preview may be blocked by browser policy</div>
+              <div>
+                Some browsers block embedded PDFs due to cross-origin policies, privacy relay/proxy settings,
+                or `X-Frame-Options`/`Content-Security-Policy` on the source site.
+              </div>
+              <div style="margin-top:8px;" class="muted">
+                Recommended fallback: open the PDF in a new tab or download it locally. These actions remain available.
+              </div>
+              {% if has_pdf_url %}
+              <div class="state-actions">
+                <a class="btn primary" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener">Open PDF in New Tab</a>
+                <a class="btn" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener" download>Download PDF</a>
+              </div>
+              {% endif %}
+            </div>
           </div>
         </div>
-
-        <div class="section stack">
-          <div class="hint">Save Note</div>
-          <input id="noteTitle" placeholder="Title (optional)" />
-          <textarea id="noteText" placeholder="Paste class notes, summaries, formulas, etc."></textarea>
-          <button id="saveNoteBtn" type="button">Save Note</button>
-        </div>
-
-        <div class="section stack">
-          <div class="hint">Save Article URL</div>
-          <input id="urlTitle" placeholder="Title (optional)" />
-          <input id="urlInput" placeholder="https://example.com/article" />
-          <button id="saveUrlBtn" type="button">Fetch + Save URL</button>
-        </div>
-
-        <div class="section stack">
-          <div class="hint">Upload File</div>
-          <input id="fileTitle" placeholder="Title (optional)" />
-          <input id="fileInput" type="file" />
-          <button id="uploadBtn" type="button">Upload + Index</button>
-          <progress id="uploadProgress" max="100" value="0" style="width:100%; height:14px;"></progress>
-          <div class="hint" id="uploadMeta">Idle.</div>
-        </div>
-
-        <div class="section">
-          <div class="out" id="actionOut">Library ready.</div>
-        </div>
-      </aside>
-
-      <main class="main">
-        <div class="topbar">
-          <span class="pill">owner: <strong id="ownerLabel">{{ owner }}</strong></span>
-          <span class="pill" id="countPill">0 items</span>
-        </div>
-        <div class="filters">
-          <input id="searchInput" placeholder="Search title, preview, filename, URL..." />
-          <select id="kindFilter">
-            <option value="">All Types</option>
-            <option value="note">Notes</option>
-            <option value="url">Articles/URLs</option>
-            <option value="pdf">PDFs</option>
-            <option value="text">Text Files</option>
-            <option value="image">Images</option>
-            <option value="file">Files</option>
-          </select>
-          <select id="folderFilter">
-            <option value="">All Folders</option>
-          </select>
-          <input id="tagsFilter" placeholder="Tags filter (comma-separated)" />
-          <select id="sortBy">
-            <option value="created_at">Sort: Newest</option>
-            <option value="title">Sort: Title</option>
-            <option value="kind">Sort: Type</option>
-            <option value="text_chars">Sort: Size</option>
-          </select>
-          <select id="sortDir">
-            <option value="desc">Desc</option>
-            <option value="asc">Asc</option>
-          </select>
-          <button id="searchBtn" type="button">Search</button>
-        </div>
-        <div class="presets">
-          <input id="presetNameInput" placeholder="Preset name..." />
-          <select id="presetSelect">
-            <option value="">Saved presets...</option>
-          </select>
-          <button id="savePresetBtn" type="button">Save Preset</button>
-          <button id="applyPresetBtn" type="button">Apply</button>
-          <button id="deletePresetBtn" type="button" class="danger">Delete</button>
-        </div>
-        <div class="content">
-          <section id="listPane" class="list-pane"></section>
-          <section class="details">
-            <div class="panel" id="detailsPanel">
-              <h3>Select an item</h3>
-              <div class="panel-meta">Choose a source to browse full text and metadata.</div>
-            </div>
-          </section>
-        </div>
-        <div class="pagination">
-          <button id="prevPageBtn" type="button">Prev</button>
-          <span class="hint" id="pageMeta">Page 1 / 1</span>
-          <button id="nextPageBtn" type="button">Next</button>
-          <label class="hint" for="pageSize">Page size</label>
-          <select id="pageSize" style="width:90px;">
-            <option value="10">10</option>
-            <option value="20" selected>20</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select>
-        </div>
-      </main>
+      </div>
     </div>
 
     <script>
-      const csrfToken = document.body.dataset.csrf || "";
-      const ownerEl = document.getElementById("owner");
-      const ownerLabelEl = document.getElementById("ownerLabel");
-      const countPillEl = document.getElementById("countPill");
-      const listPaneEl = document.getElementById("listPane");
-      const detailsPanelEl = document.getElementById("detailsPanel");
-      const actionOutEl = document.getElementById("actionOut");
+      const frame = document.getElementById("pdfFrame");
+      const banner = document.getElementById("compatBanner");
 
-      const noteTitleEl = document.getElementById("noteTitle");
-      const noteTextEl = document.getElementById("noteText");
-      const urlTitleEl = document.getElementById("urlTitle");
-      const urlInputEl = document.getElementById("urlInput");
-      const fileTitleEl = document.getElementById("fileTitle");
-      const fileInputEl = document.getElementById("fileInput");
-      const uploadProgressEl = document.getElementById("uploadProgress");
-      const uploadMetaEl = document.getElementById("uploadMeta");
+      if (frame && banner) {
+        let loaded = false;
+        let timer = null;
 
-      const searchInputEl = document.getElementById("searchInput");
-      const kindFilterEl = document.getElementById("kindFilter");
-      const folderFilterEl = document.getElementById("folderFilter");
-      const tagsFilterEl = document.getElementById("tagsFilter");
-      const sortByEl = document.getElementById("sortBy");
-      const sortDirEl = document.getElementById("sortDir");
-      const defaultFolderEl = document.getElementById("defaultFolder");
-      const defaultTagsEl = document.getElementById("defaultTags");
-      const prevPageBtn = document.getElementById("prevPageBtn");
-      const nextPageBtn = document.getElementById("nextPageBtn");
-      const pageMetaEl = document.getElementById("pageMeta");
-      const pageSizeEl = document.getElementById("pageSize");
-      const allOwnersToggleEl = document.getElementById("allOwnersToggle");
-      const presetNameInputEl = document.getElementById("presetNameInput");
-      const presetSelectEl = document.getElementById("presetSelect");
-      const savePresetBtn = document.getElementById("savePresetBtn");
-      const applyPresetBtn = document.getElementById("applyPresetBtn");
-      const deletePresetBtn = document.getElementById("deletePresetBtn");
-
-      let selectedItemId = "";
-      let currentPage = 1;
-      let totalPages = 1;
-      let libraryItemCache = {};
-      let presetMap = {};
-      let pendingFolderFilter = "";
-
-      function csrfFetch(url, options = {}) {
-        const headers = new Headers(options.headers || {});
-        headers.set("X-CSRF-Token", csrfToken);
-        return fetch(url, { ...options, headers });
-      }
-
-      async function ensureAuth(res) {
-        if (res.status === 401 || res.status === 403) {
-          window.location.href = "/login";
-          return false;
-        }
-        return true;
-      }
-
-      async function openChatForOwner(ownerName) {
-        const targetOwner = (ownerName || "").trim() || owner();
-        try {
-          const listRes = await fetch("/chat/session/list");
-          if (await ensureAuth(listRes)) {
-            let exists = false;
-            if (listRes.ok) {
-              const listData = await listRes.json().catch(() => ({}));
-              const sessions = Array.isArray(listData.sessions) ? listData.sessions : [];
-              exists = sessions.some((s) => String((s || {}).owner || "") === targetOwner);
-            }
-            if (!exists) {
-              const form = new FormData();
-              form.append("owner", targetOwner);
-              const newRes = await csrfFetch("/chat/session/new", { method: "POST", body: form });
-              await ensureAuth(newRes);
-            }
-          }
-        } catch (_) {}
-        window.location.href = `/chat?owner=${encodeURIComponent(targetOwner)}`;
-      }
-
-      function owner() {
-        const raw = ownerEl.value.trim() || "default";
-        const normalized = raw.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 128) || "default";
-        ownerEl.value = normalized;
-        ownerLabelEl.textContent = normalized;
-        return normalized;
-      }
-
-      function setOut(text) {
-        actionOutEl.textContent = text || "";
-      }
-
-      function presetStorageKey() {
-        return `opensift_library_presets::${owner()}`;
-      }
-
-      function readPresetMap() {
-        try {
-          const raw = localStorage.getItem(presetStorageKey()) || "{}";
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-          return parsed;
-        } catch (_) {
-          return {};
-        }
-      }
-
-      function writePresetMap(map) {
-        localStorage.setItem(presetStorageKey(), JSON.stringify(map || {}));
-      }
-
-      function renderPresetOptions() {
-        const names = Object.keys(presetMap).sort((a, b) => a.localeCompare(b));
-        const current = presetSelectEl.value || "";
-        presetSelectEl.innerHTML = '<option value="">Saved presets...</option>';
-        for (const name of names) {
-          const opt = document.createElement("option");
-          opt.value = name;
-          opt.textContent = name;
-          presetSelectEl.appendChild(opt);
-        }
-        if (current && names.includes(current)) presetSelectEl.value = current;
-      }
-
-      function loadPresetsForOwner() {
-        presetMap = readPresetMap();
-        renderPresetOptions();
-      }
-
-      function currentFilterSnapshot() {
-        return {
-          q: searchInputEl.value.trim(),
-          kind: kindFilterEl.value || "",
-          folder: folderFilterEl.value || "",
-          tags: tagsFilterEl.value.trim(),
-          sortBy: sortByEl.value || "created_at",
-          sortDir: sortDirEl.value || "desc",
-          pageSize: pageSizeEl.value || "20",
-          allOwners: !!allOwnersToggleEl.checked,
+        const showBlocked = () => {
+          if (loaded) return;
+          banner.classList.add("show");
         };
-      }
 
-      function applyFilterSnapshot(snap) {
-        if (!snap || typeof snap !== "object") return;
-        searchInputEl.value = String(snap.q || "");
-        kindFilterEl.value = String(snap.kind || "");
-        pendingFolderFilter = String(snap.folder || "");
-        tagsFilterEl.value = String(snap.tags || "");
-        sortByEl.value = String(snap.sortBy || "created_at");
-        sortDirEl.value = String(snap.sortDir || "desc");
-        pageSizeEl.value = String(snap.pageSize || "20");
-        allOwnersToggleEl.checked = !!snap.allOwners;
-      }
-
-      function saveCurrentPreset() {
-        const name = (presetNameInputEl.value || "").trim();
-        if (!name) {
-          setOut("Enter a preset name first.");
-          return;
-        }
-        presetMap[name] = currentFilterSnapshot();
-        writePresetMap(presetMap);
-        renderPresetOptions();
-        presetSelectEl.value = name;
-        setOut(`Saved preset '${name}'.`);
-      }
-
-      async function applySelectedPreset() {
-        const name = (presetSelectEl.value || "").trim();
-        if (!name || !presetMap[name]) {
-          setOut("Choose a saved preset first.");
-          return;
-        }
-        applyFilterSnapshot(presetMap[name]);
-        currentPage = 1;
-        await loadLibraryList();
-        setOut(`Applied preset '${name}'.`);
-      }
-
-      function deleteSelectedPreset() {
-        const name = (presetSelectEl.value || "").trim();
-        if (!name || !presetMap[name]) {
-          setOut("Choose a saved preset first.");
-          return;
-        }
-        delete presetMap[name];
-        writePresetMap(presetMap);
-        renderPresetOptions();
-        setOut(`Deleted preset '${name}'.`);
-      }
-
-      function fmtTs(ts) {
-        if (!ts) return "";
-        const d = new Date(ts);
-        if (Number.isNaN(d.getTime())) return ts;
-        return d.toLocaleString();
-      }
-
-      function escapeHtml(v) {
-        return String(v || "")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#39;");
-      }
-
-      async function loadLibraryList() {
-        const o = owner();
-        const q = searchInputEl.value.trim();
-        const kind = kindFilterEl.value;
-        const folder = folderFilterEl.value || "";
-        const tags = tagsFilterEl.value.trim();
-        const allOwners = allOwnersToggleEl.checked ? "true" : "false";
-        const sortBy = sortByEl.value || "created_at";
-        const sortDir = sortDirEl.value || "desc";
-        const pageSize = pageSizeEl.value || "20";
-        const u = `/chat/library/list?owner=${encodeURIComponent(o)}&all_owners=${encodeURIComponent(allOwners)}&q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}&folder=${encodeURIComponent(folder)}&tags=${encodeURIComponent(tags)}&sort_by=${encodeURIComponent(sortBy)}&sort_dir=${encodeURIComponent(sortDir)}&page=${encodeURIComponent(currentPage)}&page_size=${encodeURIComponent(pageSize)}`;
-        const res = await fetch(u);
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) {
-          setOut("Failed to load library items.");
-          return;
-        }
-        const data = await res.json();
-        const items = data.items || [];
-        const pagination = data.pagination || {};
-        const total = Number(pagination.total || 0);
-        totalPages = Number(pagination.total_pages || 1);
-        currentPage = Number(pagination.page || 1);
-        pageMetaEl.textContent = `Page ${currentPage} / ${totalPages}`;
-        prevPageBtn.disabled = currentPage <= 1;
-        nextPageBtn.disabled = currentPage >= totalPages;
-        countPillEl.textContent = `${total} item${total === 1 ? "" : "s"}`;
-        const folders = data.folders || [];
-        const previousFolder = pendingFolderFilter || folderFilterEl.value;
-        folderFilterEl.innerHTML = '<option value="">All Folders</option>';
-        for (const f of folders) {
-          const opt = document.createElement("option");
-          opt.value = f;
-          opt.textContent = f;
-          folderFilterEl.appendChild(opt);
-        }
-        if (previousFolder) folderFilterEl.value = previousFolder;
-        pendingFolderFilter = "";
-        renderItemList(items);
-      }
-
-      function renderItemList(items) {
-        const pageIds = new Set((items || []).map((x) => String(x.id || "")));
-        for (const id of Array.from(selectedItemIds)) {
-          if (!pageIds.has(id)) selectedItemIds.delete(id);
-        }
-        libraryItemCache = {};
-        listPaneEl.innerHTML = "";
-        if (!items.length) {
-          selectAllPageEl.checked = false;
-          listPaneEl.innerHTML = `<div class="hint">No items yet. Add notes, URLs, PDFs, images, or text files.</div>`;
-          return;
-        }
-        for (const item of items) {
-          const itemId = String(item.id || "");
-          libraryItemCache[itemId] = item;
-          const isSelected = item.id === selectedItemId;
-          const isChecked = selectedItemIds.has(itemId);
-          const card = document.createElement("div");
-          card.className = "item-card";
-          if (isSelected) card.style.borderColor = "#5a76ff";
-
-          const title = escapeHtml(item.title || "Untitled");
-          const kind = escapeHtml(item.kind || "item");
-          const created = fmtTs(item.created_at);
-          const preview = escapeHtml(item.preview || "");
-          const textChars = Number(item.text_chars || 0);
-          const chunkCount = Number(item.chunk_count || 0);
-          const hasBinary = !!(item.binary_path || "");
-          const folder = escapeHtml(item.folder || "");
-          const tags = escapeHtml(item.tags || "");
-          const itemOwner = escapeHtml(item.owner || "");
-
-          card.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <label class="hint" style="display:inline-flex; align-items:center; gap:6px; margin:0;">
-                <input type="checkbox" data-action="select" ${isChecked ? "checked" : ""} />
-                select
-              </label>
-              <span class="hint">${itemOwner ? `owner: ${itemOwner}` : "owner: (unknown)"}</span>
-            </div>
-            <div class="item-title">${title}</div>
-            <div class="item-meta">${kind} · ${textChars} chars · ${chunkCount} chunks</div>
-            <div class="item-meta">${folder ? `folder: ${folder}` : "folder: (none)"}</div>
-            <div class="item-meta">${tags ? `tags: ${tags}` : "tags: (none)"}</div>
-            <div class="item-meta">${escapeHtml(created)}</div>
-            <div class="item-preview">${preview}</div>
-            <div class="item-actions">
-              <button type="button" data-action="open">Open</button>
-              ${hasBinary ? `<button type="button" data-action="download">Download</button>` : ""}
-              <button type="button" class="danger" data-action="delete">Delete</button>
-            </div>
-          `;
-
-          card.querySelector('[data-action="select"]').addEventListener("change", (ev) => {
-            if (ev.target.checked) selectedItemIds.add(itemId);
-            else selectedItemIds.delete(itemId);
-            updateSelectionUI();
-          });
-          card.querySelector('[data-action="open"]').addEventListener("click", () => openItem(item.id));
-          if (hasBinary) {
-            card.querySelector('[data-action="download"]').addEventListener("click", () => {
-              const o = owner();
-              window.open(
-                `/chat/library/download?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(item.owner || o)}&item_id=${encodeURIComponent(item.id)}`,
-                "_blank"
-              );
-            });
+        const hideBlocked = () => {
+          loaded = true;
+          banner.classList.remove("show");
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
           }
-          card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
-            const ok = confirm(`Delete '${item.title || item.id}'? This removes stored text and vectors.`);
-            if (!ok) return;
-            await deleteItem(item.id);
-          });
+        };
 
-          listPaneEl.appendChild(card);
-        }
-        updateSelectionUI();
-      }
-
-      async function openItem(itemId) {
-        selectedItemId = itemId;
-        const o = owner();
-        const cachedItem = libraryItemCache[itemId];
-        const itemOwner = (cachedItem && cachedItem.owner) ? cachedItem.owner : o;
-        const res = await fetch(`/chat/library/get?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(itemId)}`);
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) {
-          setOut("Failed to load selected item.");
-          return;
-        }
-        const data = await res.json();
-        const detailItem = data.item || {};
-        const text = data.text || "";
-        renderItemDetails(detailItem, text);
-        await loadLibraryList();
-      }
-
-      function renderItemDetails(item, text) {
-        const hasBinary = !!(item.binary_path || "");
-        const o = owner();
-        const itemOwner = String(item.owner || o);
-        const originalName = String(item.original_name || item.title || "").toLowerCase();
-        const binaryPath = String(item.binary_path || "").toLowerCase();
-        const isPdf = String(item.kind || "").toLowerCase() === "pdf" || originalName.endsWith(".pdf") || binaryPath.endsWith(".pdf");
-        const previewUrl = `/chat/library/preview?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}`;
-        detailsPanelEl.innerHTML = `
-          <h3>${escapeHtml(item.title || "Untitled")}</h3>
-          <div class="panel-meta">Type: ${escapeHtml(item.kind || "")}</div>
-          <div class="panel-meta">Owner: ${escapeHtml(itemOwner || "")}</div>
-          <div class="panel-meta">Created: ${escapeHtml(fmtTs(item.created_at))}</div>
-          <div class="panel-meta">Source URL: ${escapeHtml(item.url || "")}</div>
-          <div class="panel-meta">Filename: ${escapeHtml(item.original_name || "")}</div>
-          <div class="panel-meta">Folder: ${escapeHtml(item.folder || "(none)")}</div>
-          <div class="panel-meta">Tags: ${escapeHtml(item.tags || "(none)")}</div>
-          <div class="panel-meta">Citation title: ${escapeHtml(item.citation_title || "(none)")}</div>
-          <div class="panel-meta">Citation authors: ${escapeHtml(item.citation_authors || "(none)")}</div>
-          <div class="panel-meta">Citation year: ${escapeHtml(item.citation_year || "(none)")}</div>
-          <div class="panel-meta">Citation journal: ${escapeHtml(item.citation_journal || "(none)")}</div>
-          <div class="panel-meta">Citation DOI: ${escapeHtml(item.citation_doi || "(none)")}</div>
-          <div class="panel-meta">Citation URL: ${escapeHtml(item.citation_url || "(none)")}</div>
-          <div class="panel-meta">Text chars: ${Number(item.text_chars || 0)} · Chunks: ${Number(item.chunk_count || 0)}</div>
-          <div style="display:grid; gap:8px; margin-top:10px;">
-            <input id="editTitle" value="${escapeHtml(item.title || "")}" placeholder="Title" />
-            <input id="editFolder" value="${escapeHtml(item.folder || "")}" placeholder="Folder" />
-            <input id="editTags" value="${escapeHtml(item.tags || "")}" placeholder="Tags (comma-separated)" />
-            <input id="editCitationTitle" value="${escapeHtml(item.citation_title || "")}" placeholder="Citation title" />
-            <input id="editCitationAuthors" value="${escapeHtml(item.citation_authors || "")}" placeholder="Citation authors" />
-            <div style="display:grid; grid-template-columns: 140px 1fr; gap:8px;">
-              <input id="editCitationYear" value="${escapeHtml(item.citation_year || "")}" placeholder="Year" />
-              <input id="editCitationJournal" value="${escapeHtml(item.citation_journal || "")}" placeholder="Journal / Venue" />
-            </div>
-            <input id="editCitationDoi" value="${escapeHtml(item.citation_doi || "")}" placeholder="DOI" />
-            <input id="editCitationUrl" value="${escapeHtml(item.citation_url || "")}" placeholder="Citation URL" />
-            <button id="saveMetaBtn" type="button">Save Metadata</button>
-          </div>
-          <div style="display:flex; gap:8px; margin-top:10px;">
-            ${hasBinary ? `<button id="detailsDownloadBtn" type="button">Download Original</button>` : ""}
-            <button id="detailsToChatBtn" type="button" class="primary">Ask From Chat</button>
-          </div>
-          ${isPdf && hasBinary ? `
-            <object class="pdf-preview" data="${previewUrl}" type="application/pdf">
-              <div class="hint" style="padding:12px;">
-                PDF preview is not available in this browser.
-                If you're using Safari with Lockdown Mode enabled, inline PDF previews can be blocked for this site.
-                <a href="${previewUrl}" target="_blank" rel="noopener noreferrer">Open with Preview</a>
-                or
-                <a href="/chat/library/download?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}" target="_blank" rel="noopener noreferrer">download it</a>.
-              </div>
-            </object>
-          ` : ""}
-          ${isPdf && hasBinary ? `<div class="hint" style="margin-top:8px;">PDF preview above. If the frame is blank, Safari Lockdown Mode may be blocking inline PDF rendering for this site. Use "Open with Preview" or disable Lockdown Mode for this site.</div>` : ""}
-          <div class="panel-text">${escapeHtml(text || "(no text body found)")}</div>
-        `;
-        if (hasBinary) {
-          document.getElementById("detailsDownloadBtn").addEventListener("click", () => {
-            window.open(
-              `/chat/library/download?owner=${encodeURIComponent(o)}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id)}`,
-              "_blank"
-            );
-          });
-        }
-        document.getElementById("detailsToChatBtn").addEventListener("click", () => {
-          openChatForOwner(itemOwner);
+        frame.addEventListener("load", () => {
+          // Successful frame load means preview path is available.
+          hideBlocked();
         });
-        document.getElementById("saveMetaBtn").addEventListener("click", async () => {
-          const form = new FormData();
-          form.append("owner", o);
-          form.append("item_owner", itemOwner);
-          form.append("item_id", item.id || "");
-          form.append("title", (document.getElementById("editTitle").value || "").trim());
-          form.append("folder", (document.getElementById("editFolder").value || "").trim());
-          form.append("tags", (document.getElementById("editTags").value || "").trim());
-          form.append("citation_title", (document.getElementById("editCitationTitle").value || "").trim());
-          form.append("citation_authors", (document.getElementById("editCitationAuthors").value || "").trim());
-          form.append("citation_year", (document.getElementById("editCitationYear").value || "").trim());
-          form.append("citation_journal", (document.getElementById("editCitationJournal").value || "").trim());
-          form.append("citation_doi", (document.getElementById("editCitationDoi").value || "").trim());
-          form.append("citation_url", (document.getElementById("editCitationUrl").value || "").trim());
-          const res = await csrfFetch("/chat/library/update", { method: "POST", body: form });
-          if (!(await ensureAuth(res))) return;
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data.ok) {
-            setOut(`Save metadata failed: ${data.error || "unknown error"}`);
-            return;
-          }
-          setOut("Metadata updated.");
-          await openItem(item.id || "");
+
+        frame.addEventListener("error", () => {
+          showBlocked();
         });
+
+        // Some blocked embeds never trigger error; treat long stall as compatibility failure.
+        timer = setTimeout(showBlocked, 4500);
       }
-
-      async function deleteItem(itemId) {
-        const item = libraryItemCache[itemId];
-        const itemOwner = (item && item.owner) ? item.owner : owner();
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("item_owner", itemOwner);
-        form.append("item_id", itemId);
-        const res = await csrfFetch("/chat/library/delete", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setOut(`Delete failed: ${data.error || "unknown error"}`);
-          return;
-        }
-        if (selectedItemId === itemId) {
-          selectedItemId = "";
-          detailsPanelEl.innerHTML = `
-            <h3>Select an item</h3>
-            <div class="panel-meta">Choose a source to browse full text and metadata.</div>
-          `;
-        }
-        setOut("Deleted item.");
-        await loadLibraryList();
-      }
-
-      async function batchUpdateSelected({ folder = null, tags = null }) {
-        const items = selectedItems();
-        if (!items.length) {
-          setOut("Select one or more items first.");
-          return;
-        }
-        let ok = 0;
-        let failed = 0;
-        for (const item of items) {
-          const form = new FormData();
-          form.append("owner", owner());
-          form.append("item_owner", String(item.owner || owner()));
-          form.append("item_id", String(item.id || ""));
-          form.append("title", String(item.title || "").trim());
-          form.append("folder", folder === null ? String(item.folder || "") : String(folder));
-          form.append("tags", tags === null ? String(item.tags || "") : String(tags));
-          form.append("citation_title", String(item.citation_title || ""));
-          form.append("citation_authors", String(item.citation_authors || ""));
-          form.append("citation_year", String(item.citation_year || ""));
-          form.append("citation_journal", String(item.citation_journal || ""));
-          form.append("citation_doi", String(item.citation_doi || ""));
-          form.append("citation_url", String(item.citation_url || ""));
-          const res = await csrfFetch("/chat/library/update", { method: "POST", body: form });
-          if (!(await ensureAuth(res))) return;
-          const data = await res.json().catch(() => ({}));
-          if (res.ok && data.ok) ok += 1;
-          else failed += 1;
-        }
-        setOut(`Batch update complete. Updated: ${ok}, failed: ${failed}.`);
-        await loadLibraryList();
-        if (selectedItemId) await openItem(selectedItemId);
-      }
-
-      async function batchDeleteSelected() {
-        const items = selectedItems();
-        if (!items.length) {
-          setOut("Select one or more items first.");
-          return;
-        }
-        const confirmed = confirm(`Delete ${items.length} selected item(s)? This removes stored text and vectors.`);
-        if (!confirmed) return;
-        let ok = 0;
-        let failed = 0;
-        for (const item of items) {
-          const form = new FormData();
-          form.append("owner", owner());
-          form.append("item_owner", String(item.owner || owner()));
-          form.append("item_id", String(item.id || ""));
-          const res = await csrfFetch("/chat/library/delete", { method: "POST", body: form });
-          if (!(await ensureAuth(res))) return;
-          if (res.ok) {
-            ok += 1;
-            selectedItemIds.delete(String(item.id || ""));
-            if (selectedItemId === String(item.id || "")) selectedItemId = "";
-          } else {
-            failed += 1;
-          }
-        }
-        if (!selectedItemId) {
-          detailsPanelEl.innerHTML = `
-            <h3>Select an item</h3>
-            <div class="panel-meta">Choose a source to browse full text and metadata.</div>
-          `;
-        }
-        setOut(`Batch delete complete. Deleted: ${ok}, failed: ${failed}.`);
-        await loadLibraryList();
-      }
-
-      async function batchExportSelected() {
-        const items = selectedItems();
-        if (!items.length) {
-          setOut("Select one or more items first.");
-          return;
-        }
-        let exported = 0;
-        for (const item of items) {
-          const itemOwner = String(item.owner || owner());
-          if (item.binary_path) {
-            window.open(
-              `/chat/library/download?owner=${encodeURIComponent(owner())}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}`,
-              "_blank"
-            );
-            exported += 1;
-            continue;
-          }
-          const res = await fetch(
-            `/chat/library/get?owner=${encodeURIComponent(owner())}&item_owner=${encodeURIComponent(itemOwner)}&item_id=${encodeURIComponent(item.id || "")}`
-          );
-          if (!(await ensureAuth(res))) return;
-          if (!res.ok) continue;
-          const data = await res.json().catch(() => ({}));
-          const text = String(data.text || "");
-          const title = String(item.title || item.id || "library_item").replace(/[^a-zA-Z0-9._-]+/g, "_");
-          const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${title}.txt`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          exported += 1;
-        }
-        setOut(`Batch export started for ${exported} item(s).`);
-      }
-
-      async function saveNote() {
-        const text = noteTextEl.value.trim();
-        if (!text) {
-          setOut("Note is empty.");
-          return;
-        }
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("title", noteTitleEl.value.trim());
-        form.append("note", text);
-        form.append("folder", defaultFolderEl.value.trim());
-        form.append("tags", defaultTagsEl.value.trim());
-        const res = await csrfFetch("/chat/library/note", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.ok) {
-          setOut(`Save note failed: ${data.error || "unknown error"}`);
-          return;
-        }
-        noteTextEl.value = "";
-        noteTitleEl.value = "";
-        setOut(`Saved note: ${data.item?.title || "untitled"}`);
-        await loadLibraryList();
-      }
-
-      async function saveUrl() {
-        const rawUrl = urlInputEl.value.trim();
-        if (!rawUrl) {
-          setOut("URL is empty.");
-          return;
-        }
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("title", urlTitleEl.value.trim());
-        form.append("url", rawUrl);
-        form.append("folder", defaultFolderEl.value.trim());
-        form.append("tags", defaultTagsEl.value.trim());
-        const res = await csrfFetch("/chat/library/url", { method: "POST", body: form });
-        if (!(await ensureAuth(res))) return;
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.ok) {
-          setOut(`Save URL failed: ${data.error || "unknown error"}`);
-          return;
-        }
-        urlInputEl.value = "";
-        urlTitleEl.value = "";
-        setOut(`Saved URL: ${data.item?.title || rawUrl}`);
-        await loadLibraryList();
-      }
-
-      function uploadWithProgress(url, formData) {
-        return new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          const started = Date.now();
-
-          xhr.open("POST", url, true);
-          xhr.setRequestHeader("X-CSRF-Token", csrfToken);
-
-          xhr.upload.onprogress = (ev) => {
-            if (!ev.lengthComputable || ev.total <= 0) return;
-            const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
-            uploadProgressEl.value = pct;
-
-            const elapsedSec = Math.max(1, Math.floor((Date.now() - started) / 1000));
-            const bytesPerSec = ev.loaded / elapsedSec;
-            const remainSec = bytesPerSec > 0 ? Math.max(0, Math.ceil((ev.total - ev.loaded) / bytesPerSec)) : 0;
-            uploadMetaEl.textContent = `Uploading ${pct}% · ${remainSec}s remaining`;
-          };
-
-          xhr.onload = () => {
-            let payload = {};
-            try { payload = JSON.parse(xhr.responseText || "{}"); } catch (_) {}
-            resolve({ status: xhr.status, body: payload });
-          };
-          xhr.onerror = () => reject(new Error("upload_failed"));
-          xhr.send(formData);
-        });
-      }
-
-      async function uploadFile() {
-        const f = fileInputEl.files && fileInputEl.files[0];
-        if (!f) {
-          setOut("Choose a file first.");
-          return;
-        }
-
-        const form = new FormData();
-        form.append("owner", owner());
-        form.append("title", fileTitleEl.value.trim());
-        form.append("folder", defaultFolderEl.value.trim());
-        form.append("tags", defaultTagsEl.value.trim());
-        form.append("file", f);
-
-        uploadProgressEl.value = 0;
-        uploadMetaEl.textContent = "Starting upload...";
-        try {
-          const result = await uploadWithProgress("/chat/library/upload", form);
-          if (result.status === 401 || result.status === 403) {
-            window.location.href = "/login";
-            return;
-          }
-          if (result.status < 200 || result.status >= 300 || !result.body.ok) {
-            const err = result.body.error || "unknown error";
-            uploadMetaEl.textContent = "Failed.";
-            setOut(`Upload failed: ${err}`);
-            return;
-          }
-          uploadProgressEl.value = 100;
-          uploadMetaEl.textContent = "Completed.";
-          fileInputEl.value = "";
-          fileTitleEl.value = "";
-          setOut(`Uploaded and indexed: ${result.body.item?.title || f.name}`);
-          await loadLibraryList();
-        } catch (_) {
-          uploadMetaEl.textContent = "Failed.";
-          setOut("Upload failed due to network or browser error.");
-        }
-      }
-
-      document.getElementById("goChatBtn").addEventListener("click", () => {
-        window.location.href = `/chat?owner=${encodeURIComponent(owner())}`;
-      });
-      document.getElementById("refreshBtn").addEventListener("click", loadLibraryList);
-      document.getElementById("saveNoteBtn").addEventListener("click", saveNote);
-      document.getElementById("saveUrlBtn").addEventListener("click", saveUrl);
-      document.getElementById("uploadBtn").addEventListener("click", uploadFile);
-      document.getElementById("searchBtn").addEventListener("click", loadLibraryList);
-      selectAllPageEl.addEventListener("change", () => {
-        const checked = !!selectAllPageEl.checked;
-        for (const id of Object.keys(libraryItemCache)) {
-          if (checked) selectedItemIds.add(id);
-          else selectedItemIds.delete(id);
-        }
-        renderItemList(Object.values(libraryItemCache));
-      });
-      batchMoveBtn.addEventListener("click", async () => {
-        const target = batchMoveFolderEl.value.trim();
-        await batchUpdateSelected({ folder: target });
-      });
-      batchTagBtn.addEventListener("click", async () => {
-        const target = batchTagValueEl.value.trim();
-        await batchUpdateSelected({ tags: target });
-      });
-      batchDeleteBtn.addEventListener("click", batchDeleteSelected);
-      batchExportBtn.addEventListener("click", batchExportSelected);
-      searchInputEl.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          loadLibraryList();
-        }
-      });
-      kindFilterEl.addEventListener("change", loadLibraryList);
-      allOwnersToggleEl.addEventListener("change", () => {
-        currentPage = 1;
-        loadLibraryList();
-      });
-      folderFilterEl.addEventListener("change", loadLibraryList);
-      tagsFilterEl.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          currentPage = 1;
-          loadLibraryList();
-        }
-      });
-      sortByEl.addEventListener("change", () => {
-        currentPage = 1;
-        loadLibraryList();
-      });
-      sortDirEl.addEventListener("change", () => {
-        currentPage = 1;
-        loadLibraryList();
-      });
-      pageSizeEl.addEventListener("change", () => {
-        currentPage = 1;
-        loadLibraryList();
-      });
-      savePresetBtn.addEventListener("click", saveCurrentPreset);
-      applyPresetBtn.addEventListener("click", applySelectedPreset);
-      deletePresetBtn.addEventListener("click", deleteSelectedPreset);
-      presetSelectEl.addEventListener("change", () => {
-        const name = (presetSelectEl.value || "").trim();
-        presetNameInputEl.value = name;
-      });
-      presetNameInputEl.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          saveCurrentPreset();
-        }
-      });
-      prevPageBtn.addEventListener("click", () => {
-        if (currentPage <= 1) return;
-        currentPage -= 1;
-        loadLibraryList();
-      });
-      nextPageBtn.addEventListener("click", () => {
-        if (currentPage >= totalPages) return;
-        currentPage += 1;
-        loadLibraryList();
-      });
-      ownerEl.addEventListener("change", () => {
-        loadPresetsForOwner();
-        loadLibraryList();
-      });
-
-      loadPresetsForOwner();
-      loadLibraryList().catch(() => {
-        setOut("Failed to load library on startup.");
-      });
     </script>
   </body>
 </html>
