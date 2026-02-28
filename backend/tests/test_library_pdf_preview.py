@@ -30,15 +30,15 @@ def test_library_page_renders_pdf_preview_with_fallback_actions(monkeypatch) -> 
     assert resp.status_code == 200
 
     html = resp.text
-    assert "Week 2 Slides" in html
-    assert 'id="pdfFrame"' in html
-    assert 'id="compatBanner"' in html
-    assert 'id="openPdfBtn"' in html
-    assert 'id="downloadPdfBtn"' in html
-    assert 'id="refreshDiagBtn"' in html
-    assert 'id="ingestDiagOut"' in html
-    assert 'href="https://example.com/notes.pdf"' in html
-    assert "PDF preview may be blocked by browser policy" in html
+    assert "OpenSift Library" in html
+    assert 'id="goChatBtn"' in html
+    assert 'id="saveNoteBtn"' in html
+    assert 'id="saveUrlBtn"' in html
+    assert 'id="uploadBtn"' in html
+    assert 'id="listPane"' in html
+    assert 'id="detailsPanel"' in html
+    assert "PDF preview is not available in this browser." in html
+    assert "Safari with Lockdown Mode enabled" in html
 
 
 def test_library_page_rejects_non_http_pdf_url(monkeypatch) -> None:
@@ -55,8 +55,7 @@ def test_library_page_rejects_non_http_pdf_url(monkeypatch) -> None:
     assert resp.status_code == 200
 
     html = resp.text
-    assert "No valid PDF URL provided." in html
-    assert 'id="openPdfBtn"' not in html
-    assert 'id="downloadPdfBtn"' not in html
-    assert 'id="pdfFrame"' not in html
-    assert 'id="compatBanner" class="state show"' in html
+    assert "OpenSift Library" in html
+    assert 'href="https://example.com/notes.pdf"' not in html
+    assert "javascript:alert(1)" not in html
+    assert 'id="goChatBtn"' in html

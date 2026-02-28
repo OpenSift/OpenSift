@@ -1746,26 +1746,16 @@ async def settings_page(request: Request, owner: str = "default"):
 
 
 @app.get("/library", response_class=HTMLResponse)
-async def library_page(request: Request, owner: str = "default", pdf_url: str = "", title: str = ""):
+async def library_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
-    raw_url = (pdf_url or "").strip()
-    safe_pdf_url = ""
-    if raw_url:
-        parsed = urlparse(raw_url)
-        if parsed.scheme in ("http", "https") and parsed.netloc:
-            safe_pdf_url = raw_url
-
-    display_title = (title or "").strip() or "PDF Preview"
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "library.html",
         {
             "request": request,
             "owner": owner,
             "csrf_token": csrf_token,
-            "pdf_url": safe_pdf_url,
-            "title": display_title,
-            "has_pdf_url": bool(safe_pdf_url),
         },
     )
     _set_csrf_cookie(response, request, csrf_token)
