@@ -35,6 +35,8 @@ def test_library_page_renders_pdf_preview_with_fallback_actions(monkeypatch) -> 
     assert 'id="compatBanner"' in html
     assert 'id="openPdfBtn"' in html
     assert 'id="downloadPdfBtn"' in html
+    assert 'id="refreshDiagBtn"' in html
+    assert 'id="ingestDiagOut"' in html
     assert 'href="https://example.com/notes.pdf"' in html
     assert "PDF preview may be blocked by browser policy" in html
 

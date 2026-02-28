@@ -7,7 +7,7 @@ import os
 import re
 import socket
 from urllib.parse import urlparse
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import anyio
 import httpx
@@ -273,11 +273,21 @@ def _ocr_with_pdf2image(data: bytes) -> str:
     return "\n\n".join(out).strip()
 
 
-def extract_text_from_pdf(data: bytes) -> str:
+def extract_text_from_pdf_with_diagnostics(data: bytes) -> Tuple[str, Dict[str, Any]]:
     reader = PdfReader(io.BytesIO(data))
 
     pages: List[str] = []
     blank_pages = 0
+    page_count = len(reader.pages)
+    parser: Dict[str, Any] = {
+        "kind": "pdf",
+        "engine": "pypdf",
+        "pages_total": page_count,
+        "blank_pages": 0,
+        "ocr_attempted": False,
+        "ocr_method": "",
+        "ocr_chars": 0,
+    }
     for p in reader.pages:
         t = (p.extract_text() or "").strip()
         pages.append(t)
@@ -285,31 +295,63 @@ def extract_text_from_pdf(data: bytes) -> str:
             blank_pages += 1
 
     text = _normalize_text("\n\n".join(pages))
+    parser["blank_pages"] = blank_pages
 
     # If mostly scanned/empty, try OCR fallbacks.
-    is_likely_scanned = (blank_pages >= max(1, int(len(reader.pages) * 0.6))) or (len(text) < max(300, len(reader.pages) * 40))
+    is_likely_scanned = (blank_pages >= max(1, int(page_count * 0.6))) or (len(text) < max(300, page_count * 40))
+    parser["is_likely_scanned"] = is_likely_scanned
     if is_likely_scanned:
+        parser["ocr_attempted"] = True
         ocr_text = _ocr_with_embedded_images(reader)
+        ocr_method = "embedded_images" if ocr_text else ""
         if len(ocr_text) < 300:
-            ocr_text = _ocr_with_pdf2image(data)
+            fallback_ocr_text = _ocr_with_pdf2image(data)
+            if fallback_ocr_text:
+                ocr_text = fallback_ocr_text
+                ocr_method = "pdf2image"
 
         if len(ocr_text) > len(text):
             text = ocr_text
         elif ocr_text:
             text = _normalize_text(f"{text}\n\n{ocr_text}")
+        parser["ocr_method"] = ocr_method
+        parser["ocr_chars"] = len(ocr_text)
 
-    return text.strip()
+    clean = text.strip()
+    parser["text_chars"] = len(clean)
+    parser["non_empty"] = bool(clean)
+    return clean, parser
+
+
+def extract_text_from_pdf(data: bytes) -> str:
+    text, _ = extract_text_from_pdf_with_diagnostics(data)
+    return text
+
+
+def extract_text_from_txt_with_diagnostics(data: bytes) -> Tuple[str, Dict[str, Any]]:
+    # utf-8 first, then latin-1 fallback
+    try:
+        text = data.decode("utf-8")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        text = data.decode("latin-1", errors="ignore")
+        encoding = "latin-1"
+    parser = {
+        "kind": "text",
+        "engine": "decode",
+        "encoding": encoding,
+        "text_chars": len(text),
+        "non_empty": bool(text.strip()),
+    }
+    return text, parser
 
 
 def extract_text_from_txt(data: bytes) -> str:
-    # utf-8 first, then latin-1 fallback
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        return data.decode("latin-1", errors="ignore")
+    text, _ = extract_text_from_txt_with_diagnostics(data)
+    return text
 
 
-async def _download_html(url: str) -> str:
+async def _download_html_with_diagnostics(url: str) -> Tuple[str, Dict[str, Any]]:
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; OpenSift/0.7; +study-tool)",
         "Accept": "text/html,application/xhtml+xml",
@@ -318,6 +360,16 @@ async def _download_html(url: str) -> str:
     seen_urls = set()
     redirects = 0
     last_err: Optional[Exception] = None
+    diagnostics: Dict[str, Any] = {
+        "kind": "url",
+        "engine": "httpx+bs4",
+        "request_url": current_url,
+        "final_url": current_url,
+        "redirect_count": 0,
+        "attempt_count": 0,
+        "status_code": None,
+        "content_type": "",
+    }
 
     async with httpx.AsyncClient(follow_redirects=False, timeout=URL_TIMEOUT) as client:
         while True:
@@ -330,6 +382,7 @@ async def _download_html(url: str) -> str:
             response: Optional[httpx.Response] = None
             for attempt in range(1, MAX_URL_RETRIES + 1):
                 try:
+                    diagnostics["attempt_count"] = int(diagnostics["attempt_count"]) + 1
                     response = await client.get(current_url, headers=headers)
                     break
                 except (httpx.TimeoutException, httpx.NetworkError) as e:
@@ -348,6 +401,8 @@ async def _download_html(url: str) -> str:
                     raise RuntimeError(f"Too many redirects (>{MAX_URL_REDIRECTS}).")
                 current_url = _resolve_redirect_url(str(response.url), response.headers.get("location", ""))
                 redirects += 1
+                diagnostics["redirect_count"] = redirects
+                diagnostics["final_url"] = current_url
                 continue
 
             try:
@@ -355,20 +410,30 @@ async def _download_html(url: str) -> str:
             except httpx.HTTPStatusError as e:
                 last_err = e
                 raise
-            return response.text
+            diagnostics["status_code"] = int(response.status_code)
+            diagnostics["final_url"] = str(response.url)
+            diagnostics["content_type"] = str(response.headers.get("content-type", "")).strip()
+            diagnostics["html_chars"] = len(response.text or "")
+            return response.text, diagnostics
 
 
-async def fetch_url_text(url: str) -> Tuple[str, str]:
+async def _download_html(url: str) -> str:
+    html, _ = await _download_html_with_diagnostics(url)
+    return html
+
+
+async def fetch_url_text_with_diagnostics(url: str) -> Tuple[str, str, Dict[str, Any]]:
     """
     Returns (title, text) from a URL with extraction/retry safeguards.
     """
-    html = await _download_html(url)
+    html, parser = await _download_html_with_diagnostics(url)
     soup = BeautifulSoup(html, "html.parser")
 
     _strip_noise(soup)
     title = _extract_title(soup, fallback=url)
 
     text = _extract_main_text(soup)
+    extraction_mode = "main"
     text = _truncate_for_storage(_normalize_text(text))
 
     if len(text) < 120:
@@ -376,8 +441,18 @@ async def fetch_url_text(url: str) -> Tuple[str, str]:
         fallback_text = _truncate_for_storage(_extract_page_text_fallback(soup))
         if len(fallback_text) > len(text):
             text = fallback_text
+            extraction_mode = "fallback_page_text"
 
     if len(text) < 80:
         raise RuntimeError("Could not extract enough article text from URL")
 
+    parser["extraction_mode"] = extraction_mode
+    parser["title"] = title
+    parser["text_chars"] = len(text)
+    parser["non_empty"] = bool(text.strip())
+    return title, text, parser
+
+
+async def fetch_url_text(url: str) -> Tuple[str, str]:
+    title, text, _ = await fetch_url_text_with_diagnostics(url)
     return title, text

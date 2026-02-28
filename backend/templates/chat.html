@@ -230,6 +230,24 @@
         min-height: 84px;
         resize: vertical;
       }
+      .diag-panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 8px;
+        font-size: 12px;
+      }
+      .diag-title {
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .diag-body {
+        margin: 0;
+        white-space: pre-wrap;
+        font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+        max-height: 180px;
+        overflow: auto;
+      }
       @media (max-width: 900px) {
         .app { grid-template-columns: 1fr; }
         .controls { grid-template-columns: 1fr 1fr; }
@@ -272,6 +290,10 @@
             <input id="ingestFile" type="file" />
             <button id="ingestFileBtn" type="button">Upload + Ingest</button>
             <div class="out" id="ingestOut">No ingest action yet.</div>
+            <div class="diag-panel">
+              <div class="diag-title">Latest Ingest Diagnostics</div>
+              <pre id="ingestDiagOut" class="diag-body">No ingest diagnostics yet.</pre>
+            </div>
           </div>
         </div>
 
@@ -456,6 +478,7 @@
       const ingestFileEl = document.getElementById("ingestFile");
       const ingestFileBtn = document.getElementById("ingestFileBtn");
       const ingestOutEl = document.getElementById("ingestOut");
+      const ingestDiagOutEl = document.getElementById("ingestDiagOut");
       const flashFrontEl = document.getElementById("flashFront");
       const flashBackEl = document.getElementById("flashBack");
       const flashTagsEl = document.getElementById("flashTags");
@@ -1019,6 +1042,7 @@
         if (!(await ensureAuth(res))) return;
         const data = await res.json();
         ingestOutEl.textContent = data?.assistant?.text || `Ingest failed (HTTP ${res.status}).`;
+        renderIngestDiagnostics(data?.diagnostics || null);
       }
 
       async function ingestFile() {
@@ -1032,7 +1056,38 @@
         if (!(await ensureAuth(res))) return;
         const data = await res.json();
         ingestOutEl.textContent = data?.assistant?.text || `File ingest failed (HTTP ${res.status}).`;
+        renderIngestDiagnostics(data?.diagnostics || null);
         ingestFileEl.value = "";
+      }
+
+      function renderIngestDiagnostics(diag) {
+        if (!ingestDiagOutEl) return;
+        if (!diag || typeof diag !== "object") {
+          ingestDiagOutEl.textContent = "No ingest diagnostics yet.";
+          return;
+        }
+        const compact = {
+          status: diag.status || "unknown",
+          source: diag.source || "",
+          updated_at: diag.updated_at || "",
+          parser: diag.parser || {},
+          chunk: diag.chunk || {},
+          index: diag.index || {},
+          error: diag.error || {},
+          duration_ms: diag.duration_ms ?? null,
+          message: diag.message || "",
+        };
+        ingestDiagOutEl.textContent = JSON.stringify(compact, null, 2);
+      }
+
+      async function loadLatestIngestDiagnostics() {
+        try {
+          const res = await fetch(`/chat/ingest/diagnostics/latest?owner=${encodeURIComponent(owner())}`);
+          if (!(await ensureAuth(res))) return;
+          if (!res.ok) return;
+          const data = await res.json();
+          renderIngestDiagnostics(data?.diagnostics || null);
+        } catch (_) {}
       }
 
       function renderFlashcards(cards) {
@@ -1442,6 +1497,7 @@
           renderHistory(data.history || []);
         }
         await loadFlashcards();
+        await loadLatestIngestDiagnostics();
       });
       msgEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -1457,6 +1513,7 @@
       scrollToBottom();
       loadSessions();
       loadFlashcards();
+      loadLatestIngestDiagnostics();
     </script>
   </body>
 </html>

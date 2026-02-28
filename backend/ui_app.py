@@ -30,7 +30,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.status import HTTP_303_SEE_OTHER
 
 from app.chunking import chunk_text
-from app.ingest import extract_text_from_pdf, extract_text_from_txt, fetch_url_text
+from app.ingest import (
+    extract_text_from_pdf_with_diagnostics,
+    extract_text_from_txt_with_diagnostics,
+    fetch_url_text_with_diagnostics,
+)
 from app.llm import embed_texts, local_embedding_model_loaded, using_local_embeddings, warmup_local_embeddings
 from app.atomic_io import atomic_write_json, path_lock
 from app.logging_utils import configure_logging
@@ -159,6 +163,8 @@ db = VectorDB()
 # History persisted per owner (loaded on demand)
 CHAT_HISTORY: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
 CHAT_HISTORY_LOCK = threading.RLock()
+INGEST_DIAGNOSTICS: DefaultDict[str, Dict[str, Any]] = defaultdict(dict)
+INGEST_DIAGNOSTICS_LOCK = threading.RLock()
 
 # Default history settings for UI
 DEFAULT_HISTORY_TURNS = 10
@@ -166,6 +172,32 @@ DEFAULT_HISTORY_TURNS = 10
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _record_ingest_diagnostics(owner: str, diagnostics: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(diagnostics or {})
+    payload["owner"] = owner
+    payload["updated_at"] = _now()
+    with INGEST_DIAGNOSTICS_LOCK:
+        INGEST_DIAGNOSTICS[owner] = payload
+    return payload
+
+
+def _latest_ingest_diagnostics(owner: str) -> Dict[str, Any]:
+    with INGEST_DIAGNOSTICS_LOCK:
+        snapshot = dict(INGEST_DIAGNOSTICS.get(owner) or {})
+    if snapshot:
+        return snapshot
+    return {
+        "owner": owner,
+        "updated_at": _now(),
+        "status": "idle",
+        "parser": {},
+        "chunk": {},
+        "index": {},
+        "error": {},
+        "message": "No ingest diagnostics yet.",
+    }
 
 
 def _normalize_owner(owner: str) -> str:
@@ -1740,6 +1772,12 @@ async def library_page(request: Request, owner: str = "default", pdf_url: str = 
     return response
 
 
+@app.get("/chat/ingest/diagnostics/latest")
+async def ingest_diagnostics_latest(owner: str = "default"):
+    owner = _normalize_owner(owner)
+    return JSONResponse({"ok": True, "owner": owner, "diagnostics": _latest_ingest_diagnostics(owner)})
+
+
 @app.post("/chat/clear")
 async def chat_clear(owner: str = Form("default")):
     owner = _normalize_owner(owner)
@@ -2372,26 +2410,72 @@ async def library_note(
     citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
+    t0 = time.perf_counter()
     text = (note or "").strip()
     if not text:
-        return JSONResponse({"ok": False, "error": "note_required"}, status_code=400)
-    item = await anyio.to_thread.run_sync(
-        lambda: _library_index_text(
+        diagnostics = _record_ingest_diagnostics(
             owner,
-            "note",
-            title or "Quick Note",
-            text,
-            folder=folder,
-            tags=tags,
-            citation_title=citation_title,
-            citation_authors=citation_authors,
-            citation_year=citation_year,
-            citation_journal=citation_journal,
-            citation_doi=citation_doi,
-            citation_url=citation_url,
+            {
+                "status": "error",
+                "source": "library_note",
+                "parser": {"kind": "note", "engine": "manual", "text_chars": len(text), "non_empty": bool(text)},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "note_required", "message": "Note is required."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library note ingest failed: note_required",
+            },
         )
-    )
-    return JSONResponse({"ok": True, "owner": owner, "item": item})
+        return JSONResponse({"ok": False, "error": "note_required", "diagnostics": diagnostics}, status_code=400)
+
+    parser_diag = {"kind": "note", "engine": "manual", "text_chars": len(text), "non_empty": True}
+    try:
+        index_t0 = time.perf_counter()
+        item = await anyio.to_thread.run_sync(
+            lambda: _library_index_text(
+                owner,
+                "note",
+                title or "Quick Note",
+                text,
+                folder=folder,
+                tags=tags,
+                citation_title=citation_title,
+                citation_authors=citation_authors,
+                citation_year=citation_year,
+                citation_journal=citation_journal,
+                citation_doi=citation_doi,
+                citation_url=citation_url,
+            )
+        )
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "ok",
+                "source": "library_note",
+                "parser": parser_diag,
+                "chunk": {"count": int(item.get("chunk_count") or 0), "text_chars": int(item.get("text_chars") or len(text))},
+                "index": {"status": "ok", "duration_ms": round((time.perf_counter() - index_t0) * 1000.0, 2)},
+                "error": {},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library note ingest succeeded.",
+            },
+        )
+        return JSONResponse({"ok": True, "owner": owner, "item": item, "diagnostics": diagnostics})
+    except Exception as e:
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_note",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "index", "code": "index_failed", "message": str(e)},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": f"Library note ingest failed: {e}",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "index_failed", "message": str(e), "diagnostics": diagnostics}, status_code=400)
 
 
 @app.post("/chat/library/url")
@@ -2409,35 +2493,93 @@ async def library_url(
     citation_url: str = Form(""),
 ):
     owner = _normalize_owner(owner)
+    t0 = time.perf_counter()
     raw_url = (url or "").strip()
     if not raw_url:
-        return JSONResponse({"ok": False, "error": "url_required"}, status_code=400)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_url",
+                "parser": {"kind": "url", "engine": "httpx+bs4"},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "url_required", "message": "URL is required."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library URL ingest failed: url_required",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "url_required", "diagnostics": diagnostics}, status_code=400)
     if "://" not in raw_url:
         raw_url = f"https://{raw_url}"
     parsed = urlparse(raw_url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return JSONResponse({"ok": False, "error": "invalid_url"}, status_code=400)
-
-    page_title, text = await fetch_url_text(raw_url)
-    source_title = (title or "").strip() or page_title or raw_url
-    item = await anyio.to_thread.run_sync(
-        lambda: _library_index_text(
+        diagnostics = _record_ingest_diagnostics(
             owner,
-            "url",
-            source_title,
-            text,
-            url=raw_url,
-            folder=folder,
-            tags=tags,
-            citation_title=citation_title,
-            citation_authors=citation_authors,
-            citation_year=citation_year,
-            citation_journal=citation_journal,
-            citation_doi=citation_doi,
-            citation_url=citation_url,
+            {
+                "status": "error",
+                "source": "library_url",
+                "parser": {"kind": "url", "engine": "httpx+bs4"},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "invalid_url", "message": "Invalid URL format."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library URL ingest failed: invalid_url",
+            },
         )
-    )
-    return JSONResponse({"ok": True, "owner": owner, "item": item})
+        return JSONResponse({"ok": False, "error": "invalid_url", "diagnostics": diagnostics}, status_code=400)
+
+    parser_diag: Dict[str, Any] = {"kind": "url", "engine": "httpx+bs4", "request_url": raw_url}
+    try:
+        page_title, text, parser_diag = await fetch_url_text_with_diagnostics(raw_url)
+        source_title = (title or "").strip() or page_title or raw_url
+        index_t0 = time.perf_counter()
+        item = await anyio.to_thread.run_sync(
+            lambda: _library_index_text(
+                owner,
+                "url",
+                source_title,
+                text,
+                url=raw_url,
+                folder=folder,
+                tags=tags,
+                citation_title=citation_title,
+                citation_authors=citation_authors,
+                citation_year=citation_year,
+                citation_journal=citation_journal,
+                citation_doi=citation_doi,
+                citation_url=citation_url,
+            )
+        )
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "ok",
+                "source": "library_url",
+                "parser": parser_diag,
+                "chunk": {"count": int(item.get("chunk_count") or 0), "text_chars": int(item.get("text_chars") or len(text))},
+                "index": {"status": "ok", "duration_ms": round((time.perf_counter() - index_t0) * 1000.0, 2)},
+                "error": {},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library URL ingest succeeded.",
+            },
+        )
+        return JSONResponse({"ok": True, "owner": owner, "item": item, "diagnostics": diagnostics})
+    except Exception as e:
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_url",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "parser", "code": "url_ingest_failed", "message": str(e)},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": f"Library URL ingest failed: {e}",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "url_ingest_failed", "message": str(e), "diagnostics": diagnostics}, status_code=400)
 
 
 @app.post("/chat/library/upload")
@@ -2455,53 +2597,132 @@ async def library_upload(
     file: UploadFile = File(...),
 ):
     owner = _normalize_owner(owner)
+    t0 = time.perf_counter()
     try:
         data = await _read_upload_limited(file, MAX_UPLOAD_BYTES)
     except ValueError:
-        return JSONResponse({"ok": False, "error": "file_too_large"}, status_code=413)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_upload",
+                "parser": {"kind": "file"},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "file_too_large", "message": "File exceeds upload limit."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library upload ingest failed: file_too_large",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "file_too_large", "diagnostics": diagnostics}, status_code=413)
 
     filename = (file.filename or "upload").strip() or "upload"
     lower = filename.lower()
     kind = "file"
     text = ""
+    parser_diag: Dict[str, Any] = {"kind": "file", "filename": filename, "bytes": len(data)}
     if lower.endswith(".pdf"):
         kind = "pdf"
-        text = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf(data))
+        text, parser_diag = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf_with_diagnostics(data))
     elif lower.endswith((".txt", ".md")):
         kind = "text"
-        text = await anyio.to_thread.run_sync(lambda: extract_text_from_txt(data))
+        text, parser_diag = await anyio.to_thread.run_sync(lambda: extract_text_from_txt_with_diagnostics(data))
     elif lower.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff", ".tif")):
         kind = "image"
         text = await anyio.to_thread.run_sync(lambda: _extract_text_from_image_bytes(data))
+        parser_diag = {
+            "kind": "image",
+            "engine": "pytesseract",
+            "filename": filename,
+            "bytes": len(data),
+            "text_chars": len((text or "").strip()),
+            "non_empty": bool((text or "").strip()),
+        }
     else:
-        return JSONResponse({"ok": False, "error": "unsupported_file_type"}, status_code=400)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_upload",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "parser", "code": "unsupported_file_type", "message": "Unsupported file type."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library upload ingest failed: unsupported_file_type",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "unsupported_file_type", "diagnostics": diagnostics}, status_code=400)
 
     if not (text or "").strip():
-        return JSONResponse({"ok": False, "error": "no_text_extracted"}, status_code=400)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_upload",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "parser", "code": "no_text_extracted", "message": "No text extracted."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library upload ingest failed: no_text_extracted",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "no_text_extracted", "diagnostics": diagnostics}, status_code=400)
 
     source_id = new_source_id()
     binary_path = write_source_binary_blob(owner, source_id, filename, data, SOURCE_DIR)
     # Reuse ID for indexed source for easier file mapping.
-    item = await anyio.to_thread.run_sync(
-        lambda: _library_index_text(
-            owner=owner,
-            kind=kind,
-            title=(title or "").strip() or filename,
-            text=text,
-            original_name=filename,
-            binary_path=binary_path,
-            source_id=source_id,
-            folder=folder,
-            tags=tags,
-            citation_title=citation_title,
-            citation_authors=citation_authors,
-            citation_year=citation_year,
-            citation_journal=citation_journal,
-            citation_doi=citation_doi,
-            citation_url=citation_url,
+    try:
+        index_t0 = time.perf_counter()
+        item = await anyio.to_thread.run_sync(
+            lambda: _library_index_text(
+                owner=owner,
+                kind=kind,
+                title=(title or "").strip() or filename,
+                text=text,
+                original_name=filename,
+                binary_path=binary_path,
+                source_id=source_id,
+                folder=folder,
+                tags=tags,
+                citation_title=citation_title,
+                citation_authors=citation_authors,
+                citation_year=citation_year,
+                citation_journal=citation_journal,
+                citation_doi=citation_doi,
+                citation_url=citation_url,
+            )
         )
-    )
-    return JSONResponse({"ok": True, "owner": owner, "item": item})
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "ok",
+                "source": "library_upload",
+                "parser": parser_diag,
+                "chunk": {"count": int(item.get("chunk_count") or 0), "text_chars": int(item.get("text_chars") or len(text))},
+                "index": {"status": "ok", "duration_ms": round((time.perf_counter() - index_t0) * 1000.0, 2)},
+                "error": {},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Library upload ingest succeeded.",
+            },
+        )
+        return JSONResponse({"ok": True, "owner": owner, "item": item, "diagnostics": diagnostics})
+    except Exception as e:
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "library_upload",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "index", "code": "index_failed", "message": str(e)},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": f"Library upload ingest failed: {e}",
+            },
+        )
+        return JSONResponse({"ok": False, "error": "index_failed", "message": str(e), "diagnostics": diagnostics}, status_code=400)
 
 
 @app.post("/chat/library/delete")
@@ -2767,7 +2988,20 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "sources": [],
         }
         _history_append(owner, assistant_msg)
-        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "chat_ingest_url",
+                "parser": {"kind": "url", "engine": "httpx+bs4"},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "url_required", "message": "URL is required."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Chat URL ingest failed: url_required",
+            },
+        )
+        return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics}, status_code=400)
 
     if "://" not in raw_url:
         raw_url = f"https://{raw_url}"
@@ -2781,11 +3015,24 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "sources": [],
         }
         _history_append(owner, assistant_msg)
-        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "chat_ingest_url",
+                "parser": {"kind": "url", "engine": "httpx+bs4"},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "invalid_url", "message": "Invalid URL format."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Chat URL ingest failed: invalid_url",
+            },
+        )
+        return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics}, status_code=400)
 
     try:
         logger.info("ingest_url_start owner=%s url=%s source_title=%s", owner, raw_url, source_title.strip())
-        title, text = await fetch_url_text(raw_url)
+        title, text, parser_diag = await fetch_url_text_with_diagnostics(raw_url)
         source = source_title.strip() or title
         prefix = f"{owner}::{source}" if owner else source
 
@@ -2810,6 +3057,19 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "sources": [],
         }
         _history_append(owner, assistant_msg)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "ok",
+                "source": "chat_ingest_url",
+                "parser": parser_diag,
+                "chunk": {"count": len(chunks), "text_chars": len(text)},
+                "index": {"status": "ok", "embedded_count": len(texts), "vector_count": len(ids)},
+                "error": {},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Chat URL ingest succeeded.",
+            },
+        )
         logger.info(
             "ingest_url_success owner=%s source=%s chunks=%d duration_ms=%.2f",
             owner,
@@ -2817,7 +3077,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             len(chunks),
             (time.perf_counter() - t0) * 1000.0,
         )
-        return JSONResponse({"ok": True, "assistant": assistant_msg})
+        return JSONResponse({"ok": True, "assistant": assistant_msg, "diagnostics": diagnostics})
 
     except Exception as e:
         logger.exception(
@@ -2837,7 +3097,20 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "sources": [],
         }
         _history_append(owner, assistant_msg)
-        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=400)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "chat_ingest_url",
+                "parser": {"kind": "url", "engine": "httpx+bs4", "request_url": raw_url},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "parser", "code": "url_ingest_failed", "message": str(e)},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": f"Chat URL ingest failed: {e}",
+            },
+        )
+        return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics}, status_code=400)
 
 
 @app.post("/chat/ingest/file")
@@ -2855,16 +3128,30 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
             "sources": [],
         }
         _history_append(owner, assistant_msg)
-        return JSONResponse({"ok": False, "assistant": assistant_msg}, status_code=413)
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "chat_ingest_file",
+                "parser": {"kind": "file"},
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "validation", "code": "file_too_large", "message": "File exceeds upload limit."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Chat file ingest failed: file_too_large",
+            },
+        )
+        return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics}, status_code=413)
     filename = file.filename or "upload"
     lower = filename.lower()
+    parser_diag: Dict[str, Any] = {"kind": "file", "filename": filename, "bytes": len(data)}
 
     if lower.endswith(".pdf"):
         kind = "pdf"
-        text = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf(data))
+        text, parser_diag = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf_with_diagnostics(data))
     elif lower.endswith((".txt", ".md")):
         kind = "text"
-        text = await anyio.to_thread.run_sync(lambda: extract_text_from_txt(data))
+        text, parser_diag = await anyio.to_thread.run_sync(lambda: extract_text_from_txt_with_diagnostics(data))
     else:
         assistant_msg = {
             "role": "assistant",
@@ -2873,7 +3160,20 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
             "sources": [],
         }
         _history_append(owner, assistant_msg)
-        return JSONResponse({"ok": False, "assistant": assistant_msg})
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "chat_ingest_file",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "parser", "code": "unsupported_file_type", "message": "Unsupported file type."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Chat file ingest failed: unsupported_file_type",
+            },
+        )
+        return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics})
 
     if not text.strip():
         assistant_msg = {
@@ -2883,7 +3183,20 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
             "sources": [],
         }
         _history_append(owner, assistant_msg)
-        return JSONResponse({"ok": False, "assistant": assistant_msg})
+        diagnostics = _record_ingest_diagnostics(
+            owner,
+            {
+                "status": "error",
+                "source": "chat_ingest_file",
+                "parser": parser_diag,
+                "chunk": {},
+                "index": {},
+                "error": {"stage": "parser", "code": "no_text_extracted", "message": "No text extracted from file."},
+                "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+                "message": "Chat file ingest failed: no_text_extracted",
+            },
+        )
+        return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics})
 
     prefix = f"{owner}::{filename}" if owner else filename
     chunks = chunk_text(text, prefix=prefix)
@@ -2910,8 +3223,21 @@ async def chat_ingest_file(owner: str = Form("default"), file: UploadFile = File
         "sources": [],
     }
     _history_append(owner, assistant_msg)
+    diagnostics = _record_ingest_diagnostics(
+        owner,
+        {
+            "status": "ok",
+            "source": "chat_ingest_file",
+            "parser": parser_diag,
+            "chunk": {"count": len(chunks), "text_chars": len(text)},
+            "index": {"status": "ok", "embedded_count": len(texts), "vector_count": len(ids)},
+            "error": {},
+            "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
+            "message": "Chat file ingest succeeded.",
+        },
+    )
 
-    return JSONResponse({"ok": True, "assistant": assistant_msg})
+    return JSONResponse({"ok": True, "assistant": assistant_msg, "diagnostics": diagnostics})
 
 
 # -----------------------------------------------------------------------------
