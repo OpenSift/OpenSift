@@ -2461,7 +2461,8 @@ async def library_note(
             },
         )
         return JSONResponse({"ok": True, "owner": owner, "item": item, "diagnostics": diagnostics})
-    except Exception as e:
+    except Exception:
+        logger.exception("library_note_index_failed owner=%s", owner)
         diagnostics = _record_ingest_diagnostics(
             owner,
             {
@@ -2470,12 +2471,15 @@ async def library_note(
                 "parser": parser_diag,
                 "chunk": {},
                 "index": {},
-                "error": {"stage": "index", "code": "index_failed", "message": str(e)},
+                "error": {"stage": "index", "code": "index_failed", "message": "Internal error while indexing note."},
                 "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
-                "message": f"Library note ingest failed: {e}",
+                "message": "Library note ingest failed: index_failed",
             },
         )
-        return JSONResponse({"ok": False, "error": "index_failed", "message": str(e), "diagnostics": diagnostics}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "index_failed", "message": "Internal error while indexing note.", "diagnostics": diagnostics},
+            status_code=400,
+        )
 
 
 @app.post("/chat/library/url")
@@ -2565,7 +2569,8 @@ async def library_url(
             },
         )
         return JSONResponse({"ok": True, "owner": owner, "item": item, "diagnostics": diagnostics})
-    except Exception as e:
+    except Exception:
+        logger.exception("library_url_ingest_failed owner=%s url=%s", owner, raw_url)
         diagnostics = _record_ingest_diagnostics(
             owner,
             {
@@ -2574,12 +2579,15 @@ async def library_url(
                 "parser": parser_diag,
                 "chunk": {},
                 "index": {},
-                "error": {"stage": "parser", "code": "url_ingest_failed", "message": str(e)},
+                "error": {"stage": "parser", "code": "url_ingest_failed", "message": "URL ingest failed."},
                 "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
-                "message": f"Library URL ingest failed: {e}",
+                "message": "Library URL ingest failed: url_ingest_failed",
             },
         )
-        return JSONResponse({"ok": False, "error": "url_ingest_failed", "message": str(e), "diagnostics": diagnostics}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "url_ingest_failed", "message": "URL ingest failed.", "diagnostics": diagnostics},
+            status_code=400,
+        )
 
 
 @app.post("/chat/library/upload")
@@ -2708,7 +2716,8 @@ async def library_upload(
             },
         )
         return JSONResponse({"ok": True, "owner": owner, "item": item, "diagnostics": diagnostics})
-    except Exception as e:
+    except Exception:
+        logger.exception("library_upload_index_failed owner=%s filename=%s", owner, filename)
         diagnostics = _record_ingest_diagnostics(
             owner,
             {
@@ -2717,12 +2726,15 @@ async def library_upload(
                 "parser": parser_diag,
                 "chunk": {},
                 "index": {},
-                "error": {"stage": "index", "code": "index_failed", "message": str(e)},
+                "error": {"stage": "index", "code": "index_failed", "message": "Indexing failed."},
                 "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
-                "message": f"Library upload ingest failed: {e}",
+                "message": "Library upload ingest failed: index_failed",
             },
         )
-        return JSONResponse({"ok": False, "error": "index_failed", "message": str(e), "diagnostics": diagnostics}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "index_failed", "message": "Indexing failed.", "diagnostics": diagnostics},
+            status_code=400,
+        )
 
 
 @app.post("/chat/library/delete")
@@ -3079,7 +3091,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
         )
         return JSONResponse({"ok": True, "assistant": assistant_msg, "diagnostics": diagnostics})
 
-    except Exception as e:
+    except Exception:
         logger.exception(
             "ingest_url_failed owner=%s url=%s duration_ms=%.2f",
             owner,
@@ -3090,7 +3102,7 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
             "role": "assistant",
             "ts": _now(),
             "text": (
-                f"⚠️ URL ingest failed: {e}\n\n"
+                "⚠️ URL ingest failed.\n\n"
                 "This page may block scraping or require JavaScript rendering. "
                 "Try another URL, upload a PDF, or paste text into a .txt/.md file."
             ),
@@ -3105,9 +3117,9 @@ async def chat_ingest_url(owner: str = Form("default"), url: str = Form(...), so
                 "parser": {"kind": "url", "engine": "httpx+bs4", "request_url": raw_url},
                 "chunk": {},
                 "index": {},
-                "error": {"stage": "parser", "code": "url_ingest_failed", "message": str(e)},
+                "error": {"stage": "parser", "code": "url_ingest_failed", "message": "URL ingest failed."},
                 "duration_ms": round((time.perf_counter() - t0) * 1000.0, 2),
-                "message": f"Chat URL ingest failed: {e}",
+                "message": "Chat URL ingest failed",
             },
         )
         return JSONResponse({"ok": False, "assistant": assistant_msg, "diagnostics": diagnostics}, status_code=400)
