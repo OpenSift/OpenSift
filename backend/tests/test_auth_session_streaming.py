@@ -5,6 +5,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 import ui_app
@@ -425,3 +426,127 @@ def test_chat_stream_status_reports_requested_to_using_when_adjusted(tmp_path: P
     events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
     statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
     assert any("Requested provider/model: codex / auto -> using: openai / gpt-5.2" in s for s in statuses)
+
+
+@pytest.mark.parametrize("provider", ["openai", "claude", "codex", "claude_code"])
+def test_chat_stream_empty_generation_fallback_text_provider_matrix(tmp_path: Path, monkeypatch, provider: str) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        _ = (request, provider, prompt, model, thinking_enabled, thinking_level)
+        return {
+            "text": "",
+            "provider_requested": provider,
+            "provider_used": provider,
+            "model_requested": model,
+            "model_used": model,
+            "fallback_used": False,
+            "diagnostics": [],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": f"empty-{provider}",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": provider,
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    deltas = [e.get("text", "") for e in events if e.get("type") == "delta"]
+    assert any("Generation returned empty output from the selected provider." in text for text in deltas)
+    assert any(e.get("type") == "done" for e in events)
+
+
+@pytest.mark.parametrize(
+    "provider_requested,provider_used,model_used",
+    [
+        ("claude_code", "claude", "claude-sonnet-4-6"),
+        ("codex", "openai", "gpt-5.2"),
+    ],
+)
+def test_chat_stream_emits_fallback_status_provider_matrix(
+    tmp_path: Path,
+    monkeypatch,
+    provider_requested: str,
+    provider_used: str,
+    model_used: str,
+) -> None:
+    monkeypatch.setattr(ui_app, "SESSION_DIR", str(tmp_path / "sessions"))
+    ui_app.CHAT_HISTORY.clear()
+    client = _authed_client(monkeypatch)
+
+    monkeypatch.setattr(ui_app, "embed_texts", lambda texts: [[0.1] for _ in texts])
+    monkeypatch.setattr(ui_app, "_resolve_provider_model_pair", lambda provider, model: (provider, model, ""))
+
+    class _DB:
+        def query(self, q_emb, k=8, where=None):
+            owner = (where or {}).get("owner", "default")
+            return {
+                "documents": [["A relevant passage."]],
+                "metadatas": [[{"source": "doc.txt", "kind": "text", "owner": owner}]],
+                "distances": [[0.02]],
+                "ids": [["chunk-1"]],
+            }
+
+    monkeypatch.setattr(ui_app, "db", _DB())
+
+    async def _fake_result(request, provider, prompt, model, thinking_enabled=False, thinking_level="medium"):
+        _ = (request, prompt, thinking_enabled, thinking_level)
+        return {
+            "text": "Generated answer.",
+            "provider_requested": provider,
+            "provider_used": provider_used,
+            "model_requested": model,
+            "model_used": model_used,
+            "fallback_used": provider_used != provider,
+            "diagnostics": [f"Falling back to {provider_used}."],
+        }
+
+    monkeypatch.setattr(ui_app, "_run_generate_resilient_result", _fake_result)
+
+    resp = client.post(
+        "/chat/stream",
+        data={
+            "owner": f"fb-{provider_requested}",
+            "message": "Explain this",
+            "mode": "study_guide",
+            "provider": provider_requested,
+            "model": "",
+            "k": "4",
+            "history_turns": "5",
+            "history_enabled": "true",
+            "true_streaming": "false",
+        },
+    )
+    assert resp.status_code == 200
+
+    events = [json.loads(line) for line in resp.text.splitlines() if line.strip()]
+    statuses = [e.get("text", "") for e in events if e.get("type") == "status"]
+    assert any(f"Generation fallback in use: {provider_used} / {model_used}" in s for s in statuses)
+    assert any(f"Provider: Falling back to {provider_used}." in s for s in statuses)
