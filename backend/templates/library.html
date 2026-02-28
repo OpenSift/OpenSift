@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OpenSift Library - {{ title }}</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #121a30;
+        --text: #e9eefc;
+        --muted: #97a6c9;
+        --line: rgba(255, 255, 255, 0.12);
+        --warn-bg: rgba(214, 163, 58, 0.14);
+        --warn-line: rgba(214, 163, 58, 0.45);
+        --brand: #4f74ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(1100px 680px at -20% -20%, #2a3f81 0%, transparent 55%), linear-gradient(180deg, #080c16 0%, #0b1020 100%);
+        color: var(--text);
+        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+      }
+      .wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 18px;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 650;
+      }
+      .muted { color: var(--muted); font-size: 12px; }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+      .toolbar {
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 9px 11px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        color: var(--text);
+        text-decoration: none;
+        background: rgba(255,255,255,.04);
+      }
+      .btn.primary {
+        background: linear-gradient(180deg, #5a76ff, #4564ff);
+        border-color: var(--brand);
+      }
+      .preview {
+        position: relative;
+        min-height: 70vh;
+        background: rgba(0,0,0,.18);
+      }
+      .preview iframe {
+        width: 100%;
+        height: 72vh;
+        border: 0;
+        display: block;
+      }
+      .state {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 22px;
+        text-align: left;
+      }
+      .state.show { display: flex; }
+      .state-card {
+        max-width: 820px;
+        border: 1px solid var(--warn-line);
+        background: var(--warn-bg);
+        border-radius: 12px;
+        padding: 14px;
+        line-height: 1.45;
+      }
+      .state-title {
+        font-size: 16px;
+        font-weight: 650;
+        margin-bottom: 6px;
+      }
+      .state-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      @media (max-width: 860px) {
+        .preview iframe { height: 66vh; }
+      }
+    </style>
+  </head>
+  <body data-csrf="{{ csrf_token }}">
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <div class="title">{{ title }}</div>
+          <div class="muted">Owner: {{ owner }}</div>
+        </div>
+        <a class="btn" href="/chat?owner={{ owner | urlencode }}">Back to Chat</a>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          {% if has_pdf_url %}
+            <a id="openPdfBtn" class="btn primary" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener">Open PDF in New Tab</a>
+            <a id="downloadPdfBtn" class="btn" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener" download>Download PDF</a>
+          {% else %}
+            <span class="muted">No valid PDF URL provided.</span>
+          {% endif %}
+        </div>
+
+        <div class="preview" id="previewRoot">
+          {% if has_pdf_url %}
+            <iframe id="pdfFrame" title="PDF preview" src="{{ pdf_url }}"></iframe>
+          {% endif %}
+
+          <div id="compatBanner" class="state{% if not has_pdf_url %} show{% endif %}">
+            <div class="state-card">
+              <div class="state-title">PDF preview may be blocked by browser policy</div>
+              <div>
+                Some browsers block embedded PDFs due to cross-origin policies, privacy relay/proxy settings,
+                or `X-Frame-Options`/`Content-Security-Policy` on the source site.
+              </div>
+              <div style="margin-top:8px;" class="muted">
+                Recommended fallback: open the PDF in a new tab or download it locally. These actions remain available.
+              </div>
+              {% if has_pdf_url %}
+              <div class="state-actions">
+                <a class="btn primary" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener">Open PDF in New Tab</a>
+                <a class="btn" href="{{ pdf_url }}" target="_blank" rel="noreferrer noopener" download>Download PDF</a>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const frame = document.getElementById("pdfFrame");
+      const banner = document.getElementById("compatBanner");
+
+      if (frame && banner) {
+        let loaded = false;
+        let timer = null;
+
+        const showBlocked = () => {
+          if (loaded) return;
+          banner.classList.add("show");
+        };
+
+        const hideBlocked = () => {
+          loaded = true;
+          banner.classList.remove("show");
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        };
+
+        frame.addEventListener("load", () => {
+          // Successful frame load means preview path is available.
+          hideBlocked();
+        });
+
+        frame.addEventListener("error", () => {
+          showBlocked();
+        });
+
+        // Some blocked embeds never trigger error; treat long stall as compatibility failure.
+        timer = setTimeout(showBlocked, 4500);
+      }
+    </script>
+  </body>
+</html>
