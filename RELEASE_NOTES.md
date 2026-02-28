@@ -1,5 +1,23 @@
 # OpenSift Release Notes
 
+## v1.6.1-alpha
+Release date: 2026-02-28
+
+Release prep update for the `v1.6.0-alpha` cycle, finalizing artifacts and pass criteria.
+
+### Highlights
+- Finalized release notes and versioning for the `v1.6.0-alpha` release line.
+- Confirmed full backend test pass criteria, including Dockerized test execution.
+
+### Changed
+- Bumped app version to `1.6.1-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
+### Validation
+- Local backend test suite pass (`pytest`).
+- Dockerized backend test suite pass (`docker compose run --rm opensift-gateway python -m pytest tests -q`).
+
 ## v1.6.0-alpha
 Release date: 2026-02-27
 
