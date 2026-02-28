@@ -214,6 +214,9 @@ http://127.0.0.1:8001/
 Useful Docker commands:
 
 ```bash
+
+touch backend/.env
+
 # Start in background
 docker compose up -d --build opensift-gateway
 
@@ -260,7 +263,7 @@ Docker notes:
 Image versioning notes:
 - Local `docker compose` builds are tagged as `opensift-opensift-gateway:latest`.
 - For external publishing, use version-aligned tags, e.g.:
-  - `ghcr.io/opensift/opensift-gateway:1.3.1-alpha`
+  - `ghcr.io/opensift/opensift-gateway:1.6.0-alpha`
   - `ghcr.io/opensift/opensift-gateway:latest`
 
 

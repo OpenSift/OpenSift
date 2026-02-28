@@ -34,3 +34,8 @@ class VectorDB:
             where=where,
             include=["documents", "metadatas", "distances"],
         )
+
+    def delete(self, ids: List[str]) -> None:
+        if not ids:
+            return
+        self.col.delete(ids=ids)

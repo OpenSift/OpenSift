@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import anyio
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -67,6 +67,21 @@ from study_store import (
 )
 from quiz_store import DEFAULT_DIR as QUIZ_DIR, add_attempt, delete_attempt, load_attempts
 from flashcard_store import DEFAULT_DIR as FLASHCARD_DIR, add_card, delete_card, due_cards, load_cards, review_card
+from source_store import (
+    batch_mutate_items as batch_mutate_source_items,
+    DEFAULT_DIR as SOURCE_DIR,
+    add_item as add_source_item,
+    delete_item as delete_source_item,
+    get_item as get_source_item,
+    list_owners as list_source_owners,
+    load_items as load_source_items,
+    new_source_id,
+    read_text_blob as read_source_text_blob,
+    remove_file as remove_source_file,
+    update_item as update_source_item,
+    write_binary_blob as write_source_binary_blob,
+    write_text_blob as write_source_text_blob,
+)
 
 # -----------------------------------------------------------------------------
 # Setup
@@ -76,7 +91,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.3.1-alpha"
+OPENSIFT_VERSION = "1.6.0-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
@@ -109,6 +124,22 @@ def _start_embedding_warmup_if_enabled() -> None:
             logger.exception("embedding_warmup_failed provider=local")
 
     threading.Thread(target=_run, name="opensift-embed-warmup", daemon=True).start()
+
+
+def _extract_text_from_image_bytes(data: bytes) -> str:
+    try:
+        from PIL import Image  # type: ignore
+        import pytesseract  # type: ignore
+    except Exception:
+        return ""
+    try:
+        import io
+
+        img = Image.open(io.BytesIO(data))
+        text = pytesseract.image_to_string(img, lang=os.getenv("OPENSIFT_OCR_LANG", "eng")) or ""
+        return text.strip()
+    except Exception:
+        return ""
 
 
 @asynccontextmanager
@@ -426,6 +457,8 @@ MAX_CHAT_MESSAGE_CHARS = max(256, int(os.getenv("OPENSIFT_MAX_CHAT_MESSAGE_CHARS
 MAX_SESSION_IMPORT_CHARS = max(1024, int(os.getenv("OPENSIFT_MAX_SESSION_IMPORT_CHARS", "2000000")))
 MAX_HISTORY_TURNS = max(1, int(os.getenv("OPENSIFT_MAX_HISTORY_TURNS", "30")))
 MAX_RETRIEVAL_K = max(1, int(os.getenv("OPENSIFT_MAX_RETRIEVAL_K", "20")))
+ALLOWED_RETRIEVAL_MODES = ("semantic_plus_pinned", "semantic_only", "pinned_only")
+ALLOWED_RETRIEVAL_DEPTHS = ("fast", "balanced", "deep")
 try:
     RETRIEVAL_TIMEOUT_SECONDS = max(5.0, float(os.getenv("OPENSIFT_RETRIEVAL_TIMEOUT_SECONDS", "300")))
 except Exception:
@@ -502,6 +535,30 @@ def _sanitize_post_params(mode: str, provider: str, k: int, history_turns: int) 
     k_clean = max(1, min(int(k), MAX_RETRIEVAL_K))
     turns_clean = max(0, min(int(history_turns), MAX_HISTORY_TURNS))
     return mode_clean, provider_clean, k_clean, turns_clean
+
+
+def _sanitize_retrieval_mode(retrieval_mode: str) -> str:
+    mode = (retrieval_mode or "semantic_plus_pinned").strip().lower()
+    if mode not in ALLOWED_RETRIEVAL_MODES:
+        raise ValueError("invalid_retrieval_mode")
+    return mode
+
+
+def _sanitize_retrieval_params(retrieval_mode: str, retrieval_depth: str) -> Tuple[str, str]:
+    mode = _sanitize_retrieval_mode(retrieval_mode)
+    depth = (retrieval_depth or "balanced").strip().lower()
+    if depth not in ALLOWED_RETRIEVAL_DEPTHS:
+        raise ValueError("invalid_retrieval_depth")
+    return mode, depth
+
+
+def _effective_retrieval_k(base_k: int, retrieval_depth: str) -> int:
+    depth = (retrieval_depth or "balanced").strip().lower()
+    if depth == "fast":
+        return max(1, min(base_k, MAX_RETRIEVAL_K))
+    if depth == "deep":
+        return max(1, min(base_k * 2, MAX_RETRIEVAL_K))
+    return max(1, min(int(base_k * 1.5), MAX_RETRIEVAL_K))
 
 
 def _preferred_provider_default() -> str:
@@ -1104,6 +1161,7 @@ async def _print_startup_token():
     logger.info("study_library_dir=%s", STUDY_DIR)
     logger.info("quiz_attempts_dir=%s", QUIZ_DIR)
     logger.info("flashcards_dir=%s", FLASHCARD_DIR)
+    logger.info("sources_dir=%s", SOURCE_DIR)
 
 
 # -----------------------------------------------------------------------------
@@ -1171,82 +1229,180 @@ def _run_generate(
     thinking_enabled: bool = False,
     thinking_level: str = "medium",
 ) -> str:
+    return _run_generate_result(
+        provider,
+        prompt,
+        model,
+        thinking_enabled=thinking_enabled,
+        thinking_level=thinking_level,
+    )["text"]
+
+
+_ORIGINAL_RUN_GENERATE = _run_generate
+
+
+def _run_generate_result(
+    provider: str,
+    prompt: str,
+    model: str,
+    thinking_enabled: bool = False,
+    thinking_level: str = "medium",
+) -> Dict[str, Any]:
+    """
+    Structured generation contract for UI runtime and diagnostics.
+    Returns:
+      {
+        "text": str,
+        "provider_requested": str,
+        "provider_used": str,
+        "model_requested": str,
+        "model_used": str,
+        "fallback_used": bool,
+        "diagnostics": List[str],
+      }
+    """
+    provider_requested = (provider or "").strip().lower()
+    model_requested = (model or "").strip()
     provider, model, _note = _resolve_provider_model_pair(provider, model)
     provider = (provider or "").strip().lower()
     model = (model or "").strip()
 
+    diagnostics: List[str] = []
+
+    def _diag(msg: str) -> None:
+        diagnostics.append(msg)
+
+    def _compact_error(e: Exception) -> str:
+        text = (str(e) or e.__class__.__name__).replace("\n", " ").strip()
+        if len(text) > 240:
+            return text[:237] + "..."
+        return text
+
+    def _success(text: str, provider_used: str, model_used: str) -> Dict[str, Any]:
+        return {
+            "text": text,
+            "provider_requested": provider_requested or provider,
+            "provider_used": provider_used,
+            "model_requested": model_requested or model,
+            "model_used": model_used,
+            "fallback_used": provider_used != provider or model_used != (model or model_used),
+            "diagnostics": diagnostics,
+        }
+
+    def _ensure_text(out: str, label: str) -> str:
+        text = (out or "").strip()
+        if not text:
+            raise RuntimeError(f"{label} returned empty output")
+        return text
+
+    def _try_openai(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(_ensure_text(generate_with_openai(prompt, model=m), "OpenAI"), "openai", m)
+        except Exception as e:
+            _diag(f"OpenAI failed: {_compact_error(e)}")
+            return None
+
+    def _try_claude(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(
+                _ensure_text(
+                    generate_with_claude(
+                        prompt,
+                        model=m,
+                        thinking_enabled=thinking_enabled,
+                        thinking_level=thinking_level,
+                    ),
+                    "Claude API",
+                ),
+                "claude",
+                m,
+            )
+        except Exception as e:
+            _diag(f"Claude API failed: {_compact_error(e)}")
+            return None
+
+    def _try_claude_code(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(_ensure_text(generate_with_claude_code(prompt, model=m), "Claude Code CLI"), "claude_code", m)
+        except Exception as e:
+            _diag(f"Claude Code CLI failed: {_compact_error(e)}")
+            return None
+
+    def _try_codex(m: str, reason: str) -> Optional[Dict[str, Any]]:
+        try:
+            if reason:
+                _diag(reason)
+            return _success(_ensure_text(generate_with_codex(prompt, model=m), "Codex CLI"), "codex", m)
+        except Exception as e:
+            _diag(f"Codex CLI failed: {_compact_error(e)}")
+            return None
+
     if provider == "openai":
         m = model or DEFAULT_OPENAI_MODEL
-        return generate_with_openai(prompt, model=m)
+        out = _try_openai(m, "")
+        if out:
+            return out
+        raise RuntimeError("Generation failed for OpenAI. " + " | ".join(diagnostics[-6:]))
 
     if provider == "claude":
         m = model or DEFAULT_CLAUDE_MODEL
-        return generate_with_claude(
-            prompt,
-            model=m,
-            thinking_enabled=thinking_enabled,
-            thinking_level=thinking_level,
-        )
+        out = _try_claude(m, "")
+        if out:
+            return out
+        raise RuntimeError("Generation failed for Claude API. " + " | ".join(diagnostics[-6:]))
 
     if provider == "claude_code":
-        # Prefer Claude Code CLI; if unavailable and Anthropic API key exists, fallback to Claude API.
         m = model or DEFAULT_CLAUDE_MODEL
-        if not claude_code_cli_available():
-            if os.getenv("ANTHROPIC_API_KEY", "").strip():
-                logger.warning("claude_code_cli_unavailable_fallback_to_claude_api model=%s", m)
-                return generate_with_claude(
-                    prompt,
-                    model=m,
-                    thinking_enabled=thinking_enabled,
-                    thinking_level=thinking_level,
-                )
-            if codex_cli_available() and codex_auth_detected():
-                logger.warning("claude_code_cli_unavailable_fallback_to_codex model=%s", DEFAULT_CODEX_MODEL)
-                return generate_with_codex(prompt, model=DEFAULT_CODEX_MODEL)
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("claude_code_cli_unavailable_fallback_to_openai_api model=%s", DEFAULT_OPENAI_MODEL)
-                return generate_with_openai(prompt, model=DEFAULT_OPENAI_MODEL)
-            raise RuntimeError(
-                "Claude Code CLI not found and no fallback provider configured. "
-                "Install Claude Code or set OPENSIFT_CLAUDE_CODE_CMD, or configure ANTHROPIC_API_KEY/OPENAI_API_KEY."
-            )
-        try:
-            return generate_with_claude_code(prompt, model=m)
-        except Exception:
-            # Claude CLI can return success with no usable output in headless environments.
-            if os.getenv("ANTHROPIC_API_KEY", "").strip():
-                logger.warning("claude_code_generation_failed_fallback_to_claude_api model=%s", m)
-                return generate_with_claude(
-                    prompt,
-                    model=m,
-                    thinking_enabled=thinking_enabled,
-                    thinking_level=thinking_level,
-                )
-            if codex_cli_available() and codex_auth_detected():
-                logger.warning("claude_code_generation_failed_fallback_to_codex model=%s", DEFAULT_CODEX_MODEL)
-                return generate_with_codex(prompt, model=DEFAULT_CODEX_MODEL)
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("claude_code_generation_failed_fallback_to_openai_api model=%s", DEFAULT_OPENAI_MODEL)
-                return generate_with_openai(prompt, model=DEFAULT_OPENAI_MODEL)
-            raise
+        if claude_code_cli_available():
+            out = _try_claude_code(m, "")
+            if out:
+                return out
+        else:
+            _diag("Claude Code CLI unavailable.")
+
+        if os.getenv("ANTHROPIC_API_KEY", "").strip():
+            out = _try_claude(m, "Falling back from Claude Code CLI to Claude API.")
+            if out:
+                return out
+        if codex_cli_available() and codex_auth_detected():
+            out = _try_codex(DEFAULT_CODEX_MODEL, "Falling back from Claude Code CLI to Codex CLI.")
+            if out:
+                return out
+        if os.getenv("OPENAI_API_KEY", "").strip():
+            out = _try_openai(DEFAULT_OPENAI_MODEL, "Falling back from Claude Code CLI to OpenAI API.")
+            if out:
+                return out
+
+        raise RuntimeError(
+            "Generation failed for Claude Code path. "
+            "Install Claude Code or set OPENSIFT_CLAUDE_CODE_CMD, or configure ANTHROPIC_API_KEY/OPENAI_API_KEY. "
+            + " | ".join(diagnostics[-8:])
+        )
 
     if provider == "codex":
         m = model or DEFAULT_CODEX_MODEL
-        if not codex_cli_available():
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("codex_cli_unavailable_fallback_to_openai_api model=%s", m)
-                return generate_with_openai(prompt, model=m or DEFAULT_OPENAI_MODEL)
-            raise RuntimeError(
-                "Codex CLI not found and no OPENAI_API_KEY configured. "
-                "Install Codex CLI or set OPENSIFT_CODEX_CMD, or configure OpenAI API key."
-            )
-        try:
-            return generate_with_codex(prompt, model=m)
-        except Exception:
-            if os.getenv("OPENAI_API_KEY", "").strip():
-                logger.warning("codex_generation_failed_fallback_to_openai_api model=%s", m)
-                return generate_with_openai(prompt, model=m or DEFAULT_OPENAI_MODEL)
-            raise
+        if codex_cli_available():
+            out = _try_codex(m, "")
+            if out:
+                return out
+        else:
+            _diag("Codex CLI unavailable.")
+
+        if os.getenv("OPENAI_API_KEY", "").strip():
+            out = _try_openai(m or DEFAULT_OPENAI_MODEL, "Falling back from Codex CLI to OpenAI API.")
+            if out:
+                return out
+        raise RuntimeError(
+            "Generation failed for Codex path. "
+            "Install Codex CLI or set OPENSIFT_CODEX_CMD, or configure OPENAI_API_KEY. "
+            + " | ".join(diagnostics[-8:])
+        )
 
     raise RuntimeError(f"Unknown provider: {provider}")
 
@@ -1259,14 +1415,50 @@ async def _run_generate_resilient(
     thinking_enabled: bool = False,
     thinking_level: str = "medium",
 ) -> str:
-    task: "asyncio.Task[str]" = asyncio.create_task(
+    return (await _run_generate_resilient_result(
+        request,
+        provider,
+        prompt,
+        model,
+        thinking_enabled=thinking_enabled,
+        thinking_level=thinking_level,
+    ))["text"]
+
+
+async def _run_generate_resilient_result(
+    request: Request,
+    provider: str,
+    prompt: str,
+    model: str,
+    thinking_enabled: bool = False,
+    thinking_level: str = "medium",
+) -> Dict[str, Any]:
+    task: "asyncio.Task[Dict[str, Any]]" = asyncio.create_task(
         anyio.to_thread.run_sync(
-            lambda: _run_generate(
-                provider,
-                prompt,
-                model,
-                thinking_enabled=thinking_enabled,
-                thinking_level=thinking_level,
+            lambda: (
+                _run_generate_result(
+                    provider,
+                    prompt,
+                    model,
+                    thinking_enabled=thinking_enabled,
+                    thinking_level=thinking_level,
+                )
+                if _run_generate is _ORIGINAL_RUN_GENERATE
+                else {
+                    "text": _run_generate(
+                        provider,
+                        prompt,
+                        model,
+                        thinking_enabled=thinking_enabled,
+                        thinking_level=thinking_level,
+                    ),
+                    "provider_requested": (provider or "").strip().lower(),
+                    "provider_used": (provider or "").strip().lower(),
+                    "model_requested": (model or "").strip(),
+                    "model_used": (model or "").strip(),
+                    "fallback_used": False,
+                    "diagnostics": [],
+                }
             ),
             abandon_on_cancel=False,
         )
@@ -1304,6 +1496,7 @@ async def health():
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
@@ -1324,6 +1517,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 
     if not ok:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1352,6 +1546,7 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
 @app.get("/set-password", response_class=HTMLResponse)
 async def set_password_page(request: Request):
     response = templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
     )
@@ -1372,6 +1567,7 @@ async def set_password_submit(
 
     if not secrets.compare_digest(token, GEN_TOKEN):
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1387,6 +1583,7 @@ async def set_password_submit(
 
     if len(new_password) < 8:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1402,6 +1599,7 @@ async def set_password_submit(
 
     if new_password != confirm_password:
         response = templates.TemplateResponse(
+            request,
             "login.html",
             {
                 "request": request,
@@ -1447,6 +1645,7 @@ async def root(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     provider_caps = _provider_runtime_caps()
     response = templates.TemplateResponse(
+        request,
         "chat.html",
         {
             "request": request,
@@ -1474,6 +1673,7 @@ async def chat_page(request: Request, owner: str = "default"):
     csrf_token = _csrf_token_for_request(request)
     provider_caps = _provider_runtime_caps()
     response = templates.TemplateResponse(
+        request,
         "chat.html",
         {
             "request": request,
@@ -1499,6 +1699,7 @@ async def settings_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -1738,7 +1939,7 @@ async def session_new(owner: str = Form("default")):
 
 
 @app.post("/chat/session/delete")
-async def session_delete(owner: str = Form(...)):
+async def session_delete(owner: str = Form(...), delete_library_items: bool = Form(False)):
     owner = _normalize_owner(owner)
     if not owner:
         return JSONResponse({"ok": False, "error": "owner_required"}, status_code=400)
@@ -1746,7 +1947,35 @@ async def session_delete(owner: str = Form(...)):
     ok = delete_session(owner, SESSION_DIR)
     if not ok:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
-    return JSONResponse({"ok": True, "owner": owner})
+
+    deleted_library_count = 0
+    if delete_library_items:
+        items = load_source_items(owner, SOURCE_DIR)
+        for item in items:
+            item_id = str(item.get("id") or "").strip()
+            if not item_id:
+                continue
+            removed = delete_source_item(owner, item_id, SOURCE_DIR)
+            if not removed:
+                continue
+            chunk_ids = [x for x in (removed.get("chunk_ids") or []) if isinstance(x, str)]
+            if chunk_ids:
+                try:
+                    await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
+                except Exception:
+                    logger.exception("session_delete_vector_chunks_failed owner=%s item_id=%s", owner, item_id)
+            remove_source_file(str(removed.get("binary_path") or ""))
+            remove_source_file(str(removed.get("text_path") or ""))
+            deleted_library_count += 1
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "owner": owner,
+            "delete_library_items": bool(delete_library_items),
+            "deleted_library_count": deleted_library_count,
+        }
+    )
 
 
 @app.get("/chat/soul")
@@ -1944,6 +2173,583 @@ async def flashcards_delete(owner: str = Form("default"), card_id: str = Form(..
     return JSONResponse({"ok": True, "owner": owner, "card_id": card_id})
 
 
+def _library_index_text(
+    owner: str,
+    kind: str,
+    title: str,
+    text: str,
+    url: str = "",
+    original_name: str = "",
+    binary_path: str = "",
+    source_id: str = "",
+    folder: str = "",
+    tags: str = "",
+    citation_title: str = "",
+    citation_authors: str = "",
+    citation_year: str = "",
+    citation_journal: str = "",
+    citation_doi: str = "",
+    citation_url: str = "",
+) -> Dict[str, Any]:
+    owner = _normalize_owner(owner)
+    clean_text = (text or "").strip()
+    if not clean_text:
+        raise RuntimeError("No extractable text found for this source.")
+
+    source_id = (source_id or "").strip() or new_source_id()
+    prefix = f"{owner}::source::{source_id}"
+    chunks = chunk_text(clean_text, prefix=prefix)
+    if not chunks:
+        raise RuntimeError("No chunkable text extracted from source.")
+
+    texts = [c.text for c in chunks]
+    ids = [c.chunk_id for c in chunks]
+    metas = [
+        {
+            "source": title,
+            "source_id": source_id,
+            "kind": kind,
+            "owner": owner,
+            "url": url,
+            "original_name": original_name,
+            "start": c.start,
+            "end": c.end,
+        }
+        for c in chunks
+    ]
+
+    embs = embed_texts(texts)
+    db.add(ids=ids, documents=texts, metadatas=metas, embeddings=embs)
+
+    text_path = write_source_text_blob(owner, source_id, clean_text, SOURCE_DIR)
+    item = {
+        "id": source_id,
+        "owner": owner,
+        "kind": kind,
+        "title": (title or "").strip() or f"Untitled {kind}",
+        "url": (url or "").strip(),
+        "original_name": (original_name or "").strip(),
+        "binary_path": (binary_path or "").strip(),
+        "text_path": text_path,
+        "preview": clean_text[:320],
+        "text_chars": len(clean_text),
+        "chunk_count": len(chunks),
+        "chunk_ids": ids,
+        "folder": (folder or "").strip(),
+        "tags": (tags or "").strip(),
+        "citation_title": "",
+        "citation_authors": "",
+        "citation_year": "",
+        "citation_journal": "",
+        "citation_doi": "",
+        "citation_url": "",
+        "created_at": _now(),
+    }
+    add_source_item(owner, item, SOURCE_DIR)
+    return item
+
+
+# -----------------------------------------------------------------------------
+# Library endpoints (separate from chat UI, but shared retrieval DB)
+# -----------------------------------------------------------------------------
+@app.get("/chat/library/list")
+async def library_list(
+    owner: str = "default",
+    all_owners: bool = False,
+    q: str = "",
+    kind: str = "",
+    folder: str = "",
+    tags: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+):
+    owner = _normalize_owner(owner)
+    owners: List[str]
+    if all_owners:
+        owners = list_source_owners(SOURCE_DIR)
+    else:
+        owners = [owner]
+
+    items: List[Dict[str, Any]] = []
+    for own in owners:
+        own_items = load_source_items(own, SOURCE_DIR)
+        for item in own_items:
+            if not isinstance(item, dict):
+                continue
+            if not item.get("owner"):
+                item = dict(item)
+                item["owner"] = own
+            items.append(item)
+    qq = (q or "").strip().lower()
+    kk = (kind or "").strip().lower()
+    ff = (folder or "").strip().lower()
+    tt = [x.strip().lower() for x in (tags or "").split(",") if x.strip()]
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 20), 100))
+    sort_by = (sort_by or "created_at").strip().lower()
+    sort_dir = (sort_dir or "desc").strip().lower()
+
+    if qq:
+        items = [
+            x
+            for x in items
+            if qq in (str(x.get("title", "")).lower())
+            or qq in (str(x.get("preview", "")).lower())
+            or qq in (str(x.get("original_name", "")).lower())
+            or qq in (str(x.get("url", "")).lower())
+        ]
+    if kk:
+        items = [x for x in items if str(x.get("kind", "")).lower() == kk]
+    if ff:
+        items = [x for x in items if str(x.get("folder", "")).lower() == ff]
+    if tt:
+        def _item_tags(item: Dict[str, Any]) -> List[str]:
+            return [t.strip().lower() for t in str(item.get("tags", "")).split(",") if t.strip()]
+        items = [x for x in items if all(tag in _item_tags(x) for tag in tt)]
+
+    reverse = sort_dir != "asc"
+    if sort_by == "title":
+        items.sort(key=lambda x: str(x.get("title", "")).lower(), reverse=reverse)
+    elif sort_by == "kind":
+        items.sort(key=lambda x: str(x.get("kind", "")).lower(), reverse=reverse)
+    elif sort_by == "text_chars":
+        items.sort(key=lambda x: int(x.get("text_chars") or 0), reverse=reverse)
+    else:
+        items.sort(key=lambda x: str(x.get("created_at", "")), reverse=reverse)
+
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_items = items[start:end]
+    folders = sorted({str(x.get("folder", "")).strip() for x in items if str(x.get("folder", "")).strip()})
+    all_owner_names = sorted({str(x.get("owner", "")).strip() for x in items if str(x.get("owner", "")).strip()})
+    return JSONResponse(
+        {
+            "ok": True,
+            "owner": owner,
+            "all_owners": all_owners,
+            "items": page_items,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
+            },
+            "folders": folders,
+            "owners": all_owner_names,
+        }
+    )
+
+
+@app.get("/chat/library/get")
+async def library_get(owner: str = "default", item_owner: str = "", item_id: str = ""):
+    owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
+    item = get_source_item(effective_owner, item_id, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    text = read_source_text_blob(str(item.get("text_path") or ""))
+    if not item.get("owner"):
+        item = dict(item)
+        item["owner"] = effective_owner
+    return JSONResponse({"ok": True, "owner": owner, "item": item, "text": text})
+
+
+@app.post("/chat/library/note")
+async def library_note(
+    owner: str = Form("default"),
+    title: str = Form(""),
+    note: str = Form(...),
+    folder: str = Form(""),
+    tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
+):
+    owner = _normalize_owner(owner)
+    text = (note or "").strip()
+    if not text:
+        return JSONResponse({"ok": False, "error": "note_required"}, status_code=400)
+    item = await anyio.to_thread.run_sync(
+        lambda: _library_index_text(
+            owner,
+            "note",
+            title or "Quick Note",
+            text,
+            folder=folder,
+            tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
+        )
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/library/url")
+async def library_url(
+    owner: str = Form("default"),
+    url: str = Form(...),
+    title: str = Form(""),
+    folder: str = Form(""),
+    tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
+):
+    owner = _normalize_owner(owner)
+    raw_url = (url or "").strip()
+    if not raw_url:
+        return JSONResponse({"ok": False, "error": "url_required"}, status_code=400)
+    if "://" not in raw_url:
+        raw_url = f"https://{raw_url}"
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return JSONResponse({"ok": False, "error": "invalid_url"}, status_code=400)
+
+    page_title, text = await fetch_url_text(raw_url)
+    source_title = (title or "").strip() or page_title or raw_url
+    item = await anyio.to_thread.run_sync(
+        lambda: _library_index_text(
+            owner,
+            "url",
+            source_title,
+            text,
+            url=raw_url,
+            folder=folder,
+            tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
+        )
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/library/upload")
+async def library_upload(
+    owner: str = Form("default"),
+    title: str = Form(""),
+    folder: str = Form(""),
+    tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
+    file: UploadFile = File(...),
+):
+    owner = _normalize_owner(owner)
+    try:
+        data = await _read_upload_limited(file, MAX_UPLOAD_BYTES)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "file_too_large"}, status_code=413)
+
+    filename = (file.filename or "upload").strip() or "upload"
+    lower = filename.lower()
+    kind = "file"
+    text = ""
+    if lower.endswith(".pdf"):
+        kind = "pdf"
+        text = await anyio.to_thread.run_sync(lambda: extract_text_from_pdf(data))
+    elif lower.endswith((".txt", ".md")):
+        kind = "text"
+        text = await anyio.to_thread.run_sync(lambda: extract_text_from_txt(data))
+    elif lower.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff", ".tif")):
+        kind = "image"
+        text = await anyio.to_thread.run_sync(lambda: _extract_text_from_image_bytes(data))
+    else:
+        return JSONResponse({"ok": False, "error": "unsupported_file_type"}, status_code=400)
+
+    if not (text or "").strip():
+        return JSONResponse({"ok": False, "error": "no_text_extracted"}, status_code=400)
+
+    source_id = new_source_id()
+    binary_path = write_source_binary_blob(owner, source_id, filename, data, SOURCE_DIR)
+    # Reuse ID for indexed source for easier file mapping.
+    item = await anyio.to_thread.run_sync(
+        lambda: _library_index_text(
+            owner=owner,
+            kind=kind,
+            title=(title or "").strip() or filename,
+            text=text,
+            original_name=filename,
+            binary_path=binary_path,
+            source_id=source_id,
+            folder=folder,
+            tags=tags,
+            citation_title=citation_title,
+            citation_authors=citation_authors,
+            citation_year=citation_year,
+            citation_journal=citation_journal,
+            citation_doi=citation_doi,
+            citation_url=citation_url,
+        )
+    )
+    return JSONResponse({"ok": True, "owner": owner, "item": item})
+
+
+@app.post("/chat/library/delete")
+async def library_delete(owner: str = Form("default"), item_owner: str = Form(""), item_id: str = Form(...)):
+    owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
+    removed = delete_source_item(effective_owner, item_id, SOURCE_DIR)
+    if not removed:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+
+    chunk_ids = [x for x in (removed.get("chunk_ids") or []) if isinstance(x, str)]
+    if chunk_ids:
+        try:
+            await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
+        except Exception:
+            logger.exception("library_delete_vector_chunks_failed owner=%s item_id=%s", effective_owner, item_id)
+
+    remove_source_file(str(removed.get("binary_path") or ""))
+    remove_source_file(str(removed.get("text_path") or ""))
+    return JSONResponse({"ok": True, "owner": effective_owner, "item_id": item_id})
+
+
+@app.post("/chat/library/update")
+async def library_update(
+    owner: str = Form("default"),
+    item_owner: str = Form(""),
+    item_id: str = Form(...),
+    title: str = Form(""),
+    folder: str = Form(""),
+    tags: str = Form(""),
+    citation_title: str = Form(""),
+    citation_authors: str = Form(""),
+    citation_year: str = Form(""),
+    citation_journal: str = Form(""),
+    citation_doi: str = Form(""),
+    citation_url: str = Form(""),
+):
+    owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
+    patch = {
+        "title": (title or "").strip(),
+        "folder": (folder or "").strip(),
+        "tags": (tags or "").strip(),
+        "citation_title": (citation_title or "").strip(),
+        "citation_authors": (citation_authors or "").strip(),
+        "citation_year": (citation_year or "").strip(),
+        "citation_journal": (citation_journal or "").strip(),
+        "citation_doi": (citation_doi or "").strip(),
+        "citation_url": (citation_url or "").strip(),
+    }
+    item = update_source_item(effective_owner, item_id, patch, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+    if not item.get("owner"):
+        item = dict(item)
+        item["owner"] = effective_owner
+    return JSONResponse({"ok": True, "owner": effective_owner, "item": item})
+
+
+@app.post("/chat/library/batch")
+async def library_batch(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "invalid_payload"}, status_code=400)
+
+    owner = _normalize_owner(str(payload.get("owner") or "default"))
+    default_item_owner = _normalize_owner(str(payload.get("item_owner") or owner))
+    operations = payload.get("operations")
+    if not isinstance(operations, list) or not operations:
+        return JSONResponse({"ok": False, "error": "operations_required"}, status_code=400)
+    if len(operations) > 200:
+        return JSONResponse({"ok": False, "error": "too_many_operations"}, status_code=400)
+
+    indexed_results: List[Dict[str, Any]] = []
+    op_groups: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
+
+    for idx, raw in enumerate(operations):
+        if not isinstance(raw, dict):
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "op": "unknown",
+                    "owner": default_item_owner,
+                    "item_id": "",
+                    "error": "invalid_operation",
+                }
+            )
+            continue
+
+        op = str(raw.get("op") or "").strip().lower()
+        item_id = str(raw.get("item_id") or "").strip()
+        op_owner = _normalize_owner(str(raw.get("item_owner") or default_item_owner))
+
+        if op not in ("update", "delete"):
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "op": op or "unknown",
+                    "owner": op_owner,
+                    "item_id": item_id,
+                    "error": "invalid_op",
+                }
+            )
+            continue
+
+        if not item_id:
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "op": op,
+                    "owner": op_owner,
+                    "item_id": item_id,
+                    "error": "item_id_required",
+                }
+            )
+            continue
+
+        canonical: Dict[str, Any] = {"op": op, "item_id": item_id}
+        if op == "update":
+            canonical["patch"] = {
+                "title": str(raw.get("title") or "").strip(),
+                "folder": str(raw.get("folder") or "").strip(),
+                "tags": str(raw.get("tags") or "").strip(),
+            }
+        op_groups[op_owner].append((idx, canonical))
+
+    # Execute owner groups with in-order results.
+    for op_owner, entries in op_groups.items():
+        owner_ops = [entry[1] for entry in entries]
+        owner_results = batch_mutate_source_items(op_owner, owner_ops, SOURCE_DIR)
+        for (idx, canonical), res in zip(entries, owner_results):
+            op = str(canonical.get("op") or "")
+            item_id = str(canonical.get("item_id") or "")
+            if not res.get("ok"):
+                indexed_results.append(
+                    {
+                        "index": idx,
+                        "ok": False,
+                        "op": op,
+                        "owner": op_owner,
+                        "item_id": item_id,
+                        "error": str(res.get("error") or "unknown_error"),
+                    }
+                )
+                continue
+
+            item = res.get("item") if isinstance(res.get("item"), dict) else {}
+            if op == "delete":
+                chunk_ids = [x for x in (item.get("chunk_ids") or []) if isinstance(x, str)]
+                if chunk_ids:
+                    try:
+                        await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
+                    except Exception:
+                        logger.exception("library_batch_delete_vector_chunks_failed owner=%s item_id=%s", op_owner, item_id)
+                remove_source_file(str(item.get("binary_path") or ""))
+                remove_source_file(str(item.get("text_path") or ""))
+
+            if item and not item.get("owner"):
+                item = dict(item)
+                item["owner"] = op_owner
+
+            indexed_results.append(
+                {
+                    "index": idx,
+                    "ok": True,
+                    "op": op,
+                    "owner": op_owner,
+                    "item_id": item_id,
+                    "item": item,
+                }
+            )
+
+    indexed_results.sort(key=lambda x: int(x.get("index") or 0))
+    total = len(indexed_results)
+    failed = sum(1 for r in indexed_results if not r.get("ok"))
+    succeeded = total - failed
+    updated = sum(1 for r in indexed_results if r.get("ok") and r.get("op") == "update")
+    deleted = sum(1 for r in indexed_results if r.get("ok") and r.get("op") == "delete")
+    partial = succeeded > 0 and failed > 0
+
+    status = 207 if failed else 200
+    return JSONResponse(
+        {
+            "ok": failed == 0,
+            "owner": owner,
+            "partial_failure": partial,
+            "summary": {
+                "total": total,
+                "succeeded": succeeded,
+                "failed": failed,
+                "updated": updated,
+                "deleted": deleted,
+            },
+            "results": indexed_results,
+        },
+        status_code=status,
+    )
+
+
+@app.get("/chat/library/download")
+async def library_download(owner: str = "default", item_owner: str = "", item_id: str = ""):
+    owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
+    item = get_source_item(effective_owner, item_id, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+
+    binary_path = str(item.get("binary_path") or "").strip()
+    if not binary_path or not os.path.isfile(binary_path):
+        return JSONResponse({"ok": False, "error": "binary_not_available"}, status_code=404)
+
+    original_name = (item.get("original_name") or item.get("title") or "source.bin").strip()
+    return FileResponse(path=binary_path, filename=original_name)
+
+
+@app.get("/chat/library/preview")
+async def library_preview(owner: str = "default", item_owner: str = "", item_id: str = ""):
+    owner = _normalize_owner(owner)
+    effective_owner = _normalize_owner(item_owner or owner)
+    item = get_source_item(effective_owner, item_id, SOURCE_DIR)
+    if not item:
+        return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
+
+    binary_path = str(item.get("binary_path") or "").strip()
+    if not binary_path or not os.path.isfile(binary_path):
+        return JSONResponse({"ok": False, "error": "binary_not_available"}, status_code=404)
+
+    kind = str(item.get("kind") or "").strip().lower()
+    original_name = (item.get("original_name") or item.get("title") or "source.pdf").strip()
+    file_ext = os.path.splitext(binary_path)[1].lower()
+    name_ext = os.path.splitext(original_name)[1].lower()
+    if kind != "pdf" and file_ext != ".pdf" and name_ext != ".pdf":
+        return JSONResponse({"ok": False, "error": "preview_not_supported_for_kind"}, status_code=400)
+
+    return FileResponse(
+        path=binary_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{original_name}"'},
+    )
+
+
 # -----------------------------------------------------------------------------
 # Ingest endpoints
 # -----------------------------------------------------------------------------
@@ -2119,6 +2925,7 @@ async def chat_stream(
     mode: str = Form("study_guide"),
     provider: str = Form("claude_code"),  # openai | claude | claude_code | codex
     model: str = Form(""),
+    retrieval_mode: str = Form("semantic_plus_pinned"),
     k: int = Form(8),
     history_turns: int = Form(DEFAULT_HISTORY_TURNS),
     history_enabled: bool = Form(True),
@@ -2126,6 +2933,8 @@ async def chat_stream(
     thinking_level: str = Form("medium"),
     show_thinking: bool = Form(True),
     true_streaming: bool = Form(True),
+    selected_library_ids: str = Form(""),
+    retrieval_depth: str = Form("balanced"),
 ):
     owner = _normalize_owner(owner)
     msg = (message or "").strip()
@@ -2138,8 +2947,10 @@ async def chat_stream(
         )
     try:
         mode, provider, k, history_turns = _sanitize_post_params(mode, provider, k, history_turns)
+        retrieval_mode, retrieval_depth = _sanitize_retrieval_params(retrieval_mode, retrieval_depth)
     except ValueError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    effective_k = _effective_retrieval_k(k, retrieval_depth)
 
     requested_provider = provider
     requested_model = (model or "").strip()
@@ -2157,17 +2968,21 @@ async def chat_stream(
     provider = resolved_provider
     model = resolved_model
     logger.info(
-        "chat_stream_start owner=%s mode=%s provider=%s model=%s k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s",
+        "chat_stream_start owner=%s mode=%s provider=%s model=%s retrieval_mode=%s retrieval_depth=%s k=%d effective_k=%d history_enabled=%s thinking_enabled=%s thinking_level=%s show_thinking=%s true_streaming=%s selected_library_ids=%s",
         owner,
         mode,
         provider,
         model,
+        retrieval_mode,
+        retrieval_depth,
         k,
+        effective_k,
         history_enabled,
         thinking_enabled,
         thinking_level,
         show_thinking,
         true_streaming,
+        bool((selected_library_ids or "").strip()),
     )
 
     async def gen() -> AsyncGenerator[bytes, None]:
@@ -2190,6 +3005,12 @@ async def chat_stream(
                 )
             else:
                 yield _ndjson({"type": "status", "text": f"Using provider/model: {provider or 'auto'} / {active_model}"})
+            retrieval_label = {
+                "semantic_plus_pinned": "Semantic + pinned",
+                "semantic_only": "Semantic only",
+                "pinned_only": "Pinned only",
+            }.get(retrieval_mode, retrieval_mode)
+            yield _ndjson({"type": "status", "text": f"Retrieval mode: {retrieval_label}"})
             yield _ndjson({"type": "status", "text": "Retrieving relevant passages…"})
             if using_local_embeddings() and not local_embedding_model_loaded():
                 yield _ndjson(
@@ -2200,80 +3021,132 @@ async def chat_stream(
                 )
             if provider_note:
                 yield _ndjson({"type": "status", "text": provider_note})
-
-        # Retrieve
-        try:
-            with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
-                q_emb = await anyio.to_thread.run_sync(
-                    lambda: embed_texts([msg])[0],
-                    abandon_on_cancel=True,
-                )
-                owner_where = {"owner": owner} if owner else None
-                res = await anyio.to_thread.run_sync(
-                    lambda: db.query(q_emb, k=k, where=owner_where),
-                    abandon_on_cancel=True,
-                )
-        except TimeoutError:
-            err = (
-                f"Retrieval timed out after {int(RETRIEVAL_TIMEOUT_SECONDS)}s. "
-                "Try a shorter question, re-run once embeddings are warm, or ingest smaller sources."
-            )
-            logger.exception("chat_stream_retrieval_timeout owner=%s timeout_s=%.1f", owner, RETRIEVAL_TIMEOUT_SECONDS)
-            yield _ndjson({"type": "error", "message": err})
-            assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
-            _history_append(owner, assistant_msg)
-            yield _ndjson({"type": "done", "ts": _now()})
-            return
-        except Exception as e:
-            err = f"Retrieval failed: {e}"
-            logger.exception("chat_stream_retrieval_failed owner=%s", owner)
-            yield _ndjson({"type": "error", "message": err})
-            assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
-            _history_append(owner, assistant_msg)
-            yield _ndjson({"type": "done", "ts": _now()})
-            return
-
-        docs = res.get("documents", [[]])[0]
-        metas = res.get("metadatas", [[]])[0]
-        dists = res.get("distances", [[]])[0]
-        ids = res.get("ids", [[]])[0]
+            if retrieval_mode != "semantic_only" and (selected_library_ids or "").strip():
+                yield _ndjson({"type": "status", "text": "Adding selected library items as pinned context…"})
 
         results: List[Dict[str, Any]] = []
         passages: List[Dict[str, Any]] = []
-        for i in range(len(docs)):
-            if owner and metas[i].get("owner") != owner:
-                continue
-            results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
-            passages.append({"text": docs[i], "meta": metas[i]})
 
-        # Defensive fallback: if owner-filter query returned nothing, retry a global query
-        # and apply owner filtering locally. This avoids false negatives on some DB filter paths.
-        if owner and not results:
+        selected_ids = [
+            x.strip()
+            for x in (selected_library_ids or "").split(",")
+            if x.strip()
+        ][:8]
+
+        use_semantic_retrieval = retrieval_mode in ("semantic_plus_pinned", "semantic_only")
+        use_pinned_context = retrieval_mode in ("semantic_plus_pinned", "pinned_only")
+
+        if use_semantic_retrieval:
+            # Retrieve
             try:
                 with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
-                    res2 = await anyio.to_thread.run_sync(
-                        lambda: db.query(q_emb, k=max(k * 3, 24), where=None),
+                    q_emb = await anyio.to_thread.run_sync(
+                        lambda: embed_texts([msg])[0],
                         abandon_on_cancel=True,
                     )
-                docs2 = res2.get("documents", [[]])[0]
-                metas2 = res2.get("metadatas", [[]])[0]
-                dists2 = res2.get("distances", [[]])[0]
-                ids2 = res2.get("ids", [[]])[0]
-                for i in range(len(docs2)):
-                    if (metas2[i] or {}).get("owner") != owner:
-                        continue
-                    results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
-                    passages.append({"text": docs2[i], "meta": metas2[i]})
-                    if len(results) >= k:
-                        break
-            except Exception:
-                pass
+                    owner_where = {"owner": owner} if owner else None
+                    res = await anyio.to_thread.run_sync(
+                        lambda: db.query(q_emb, k=k, where=owner_where),
+                        abandon_on_cancel=True,
+                    )
+            except TimeoutError:
+                err = (
+                    f"Retrieval timed out after {int(RETRIEVAL_TIMEOUT_SECONDS)}s. "
+                    "Try a shorter question, re-run once embeddings are warm, or ingest smaller sources."
+                )
+                logger.exception("chat_stream_retrieval_timeout owner=%s timeout_s=%.1f", owner, RETRIEVAL_TIMEOUT_SECONDS)
+                yield _ndjson({"type": "error", "message": err})
+                assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
+                _history_append(owner, assistant_msg)
+                yield _ndjson({"type": "done", "ts": _now()})
+                return
+            except Exception as e:
+                err = f"Retrieval failed: {e}"
+                logger.exception("chat_stream_retrieval_failed owner=%s", owner)
+                yield _ndjson({"type": "error", "message": err})
+                assistant_msg = {"role": "assistant", "text": f"⚠️ {err}", "ts": _now(), "sources": []}
+                _history_append(owner, assistant_msg)
+                yield _ndjson({"type": "done", "ts": _now()})
+                return
 
-        if not results:
+            docs = res.get("documents", [[]])[0]
+            metas = res.get("metadatas", [[]])[0]
+            dists = res.get("distances", [[]])[0]
+            ids = res.get("ids", [[]])[0]
+
+            for i in range(len(docs)):
+                if owner and metas[i].get("owner") != owner:
+                    continue
+                results.append({"id": ids[i], "text": docs[i], "meta": metas[i], "distance": float(dists[i])})
+                passages.append({"text": docs[i], "meta": metas[i]})
+
+            # Defensive fallback: if owner-filter query returned nothing, retry a global query
+            # and apply owner filtering locally. This avoids false negatives on some DB filter paths.
+            if owner and not results:
+                try:
+                    with anyio.fail_after(RETRIEVAL_TIMEOUT_SECONDS):
+                        res2 = await anyio.to_thread.run_sync(
+                            lambda: db.query(q_emb, k=max(k * 3, 24), where=None),
+                            abandon_on_cancel=True,
+                        )
+                    docs2 = res2.get("documents", [[]])[0]
+                    metas2 = res2.get("metadatas", [[]])[0]
+                    dists2 = res2.get("distances", [[]])[0]
+                    ids2 = res2.get("ids", [[]])[0]
+                    for i in range(len(docs2)):
+                        if (metas2[i] or {}).get("owner") != owner:
+                            continue
+                        results.append({"id": ids2[i], "text": docs2[i], "meta": metas2[i], "distance": float(dists2[i])})
+                        passages.append({"text": docs2[i], "meta": metas2[i]})
+                        if len(results) >= k:
+                            break
+                except Exception as e:
+                    # Best-effort fallback retrieval failed; continue without additional results.
+                    logger.exception("chat_stream_owner_fallback_query_failed owner=%s error=%s", owner, e)
+
+        pinned_passages: List[Dict[str, Any]] = []
+        pinned_sources: List[Dict[str, Any]] = []
+        if use_pinned_context and selected_ids:
+            for sid in selected_ids:
+                item = get_source_item(owner, sid, SOURCE_DIR)
+                if not item:
+                    continue
+                text = read_source_text_blob(str(item.get("text_path") or ""))
+                text = (text or "").strip()
+                if not text:
+                    continue
+                pinned_passages.append(
+                    {
+                        "text": text[:4000],
+                        "meta": {
+                            "source": item.get("title") or item.get("original_name") or sid,
+                            "kind": "library_selected",
+                            "owner": owner,
+                            "source_id": sid,
+                            "url": item.get("url") or "",
+                        },
+                    }
+                )
+                pinned_sources.append(
+                    {
+                        "source": item.get("title") or item.get("original_name") or sid,
+                        "kind": "library_selected",
+                        "url": item.get("url") or "",
+                        "source_id": sid,
+                        "owner": owner,
+                        "distance": None,
+                        "preview": text[:240],
+                    }
+                )
+
+        if not results and not pinned_passages:
             logger.info(
-                "chat_stream_no_results owner=%s k=%d duration_ms=%.2f",
+                "chat_stream_no_results owner=%s k=%d effective_k=%d retrieval_mode=%s retrieval_depth=%s duration_ms=%.2f",
                 owner,
                 k,
+                effective_k,
+                retrieval_mode,
+                retrieval_depth,
                 (time.perf_counter() - t0) * 1000.0,
             )
             assistant_text = "I couldn’t find anything in your ingested materials for that yet. Try ingesting a PDF/URL first."
@@ -2287,6 +3160,7 @@ async def chat_stream(
                 "text": assistant_text,
                 "ts": _now(),
                 "sources": [],
+                "citations": [],
                 "break_reminder": add_break,
             }
             _history_append(owner, assistant_msg)
@@ -2295,17 +3169,50 @@ async def chat_stream(
             yield _ndjson({"type": "done", "ts": _now()})
             return
 
-        sources_payload = [
-            {
-                "source": (r["meta"] or {}).get("source"),
-                "kind": (r["meta"] or {}).get("kind"),
-                "url": (r["meta"] or {}).get("url"),
-                "distance": r["distance"],
-                "preview": (r["text"] or "")[:240],
+        sources_payload = []
+        citations_payload = []
+        for idx, r in enumerate(results[:5], start=1):
+            meta = r.get("meta") or {}
+            source_item = {
+                "source": meta.get("source"),
+                "kind": meta.get("kind"),
+                "url": meta.get("url"),
+                "distance": r.get("distance"),
+                "preview": (r.get("text") or "")[:240],
+                "source_id": meta.get("source_id"),
+                "owner": meta.get("owner"),
             }
-            for r in results[:5]
-        ]
+            sources_payload.append(source_item)
+            citations_payload.append(
+                {
+                    "n": idx,
+                    "label": f"[{idx}]",
+                    "source": source_item.get("source"),
+                    "kind": source_item.get("kind"),
+                    "url": source_item.get("url"),
+                    "source_id": source_item.get("source_id"),
+                    "owner": source_item.get("owner"),
+                    "distance": source_item.get("distance"),
+                }
+            )
+        for src in pinned_sources[:5]:
+            next_n = len(citations_payload) + 1
+            item = dict(src)
+            sources_payload.append(item)
+            citations_payload.append(
+                {
+                    "n": next_n,
+                    "label": f"[{next_n}]",
+                    "source": item.get("source"),
+                    "kind": item.get("kind"),
+                    "url": item.get("url"),
+                    "source_id": item.get("source_id"),
+                    "owner": item.get("owner"),
+                    "distance": item.get("distance"),
+                }
+            )
         yield _ndjson({"type": "sources", "sources": sources_payload})
+        yield _ndjson({"type": "citations", "citations": citations_payload})
 
         # History-aware prompt
         history_before_response = _history_snapshot(owner)
@@ -2317,7 +3224,8 @@ async def chat_stream(
             logger.exception("chat_stream_style_load_failed owner=%s", owner)
             study_style = ""
         logger.info("chat_stream_style owner=%s style_chars=%d", owner, len(study_style))
-        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=passages, study_style=study_style)
+        all_passages = pinned_passages + passages
+        prompt = build_prompt(mode=mode, query=query_for_prompt, passages=all_passages, study_style=study_style)
 
         if show_thinking:
             thinking_label = "Thinking…"
@@ -2327,6 +3235,29 @@ async def chat_stream(
 
         assistant_text = ""
 
+        async def _generate_once(gen_provider: str, gen_model: str) -> Tuple[str, List[str]]:
+            result = await _run_generate_resilient_result(
+                request,
+                gen_provider,
+                prompt,
+                gen_model,
+                thinking_enabled=thinking_enabled,
+                thinking_level=thinking_level,
+            )
+            statuses: List[str] = []
+            if show_thinking:
+                expected_provider = (gen_provider or "").strip().lower()
+                expected_model = (gen_model or "").strip()
+                used_provider = str(result.get("provider_used") or expected_provider or "auto").strip().lower()
+                used_model = str(result.get("model_used") or expected_model or "").strip()
+                if used_provider != expected_provider or (used_model and expected_model and used_model != expected_model):
+                    statuses.append(f"Generation fallback in use: {used_provider} / {(used_model or 'auto')}")
+                for d in list(result.get("diagnostics") or [])[-3:]:
+                    diag = (str(d) if d is not None else "").strip()
+                    if diag:
+                        statuses.append(f"Provider: {diag}")
+            return str(result.get("text") or ""), statuses
+
         # True streaming where possible, fallback otherwise
         try:
             p = (provider or "").strip().lower()
@@ -2334,30 +3265,22 @@ async def chat_stream(
             if p == "openai":
                 m = (model or DEFAULT_OPENAI_MODEL).strip()
                 if true_streaming:
+                    if show_thinking:
+                        yield _ndjson({"type": "status", "text": f"Generation path: streaming via openai / {m}"})
                     try:
                         async for delta in _stream_openai(prompt, m):
                             assistant_text += delta
                             yield _ndjson({"type": "delta", "text": delta})
                     except Exception:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         yield _ndjson({"type": "delta", "text": assistant_text})
                 else:
-                    text = await _run_generate_resilient(
-                        request,
-                        p,
-                        prompt,
-                        m,
-                        thinking_enabled=thinking_enabled,
-                        thinking_level=thinking_level,
-                    )
+                    text, statuses = await _generate_once(p, m)
+                    for s in statuses:
+                        yield _ndjson({"type": "status", "text": s})
                     assistant_text = text
                     for i in range(0, len(assistant_text), 80):
                         yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -2366,6 +3289,8 @@ async def chat_stream(
             elif p == "claude":
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
                 if true_streaming:
+                    if show_thinking:
+                        yield _ndjson({"type": "status", "text": f"Generation path: streaming via claude / {m}"})
                     try:
                         async for delta in _stream_anthropic(
                             prompt,
@@ -2376,25 +3301,15 @@ async def chat_stream(
                             assistant_text += delta
                             yield _ndjson({"type": "delta", "text": delta})
                     except Exception:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         yield _ndjson({"type": "delta", "text": assistant_text})
                 else:
-                    text = await _run_generate_resilient(
-                        request,
-                        p,
-                        prompt,
-                        m,
-                        thinking_enabled=thinking_enabled,
-                        thinking_level=thinking_level,
-                    )
+                    text, statuses = await _generate_once(p, m)
+                    for s in statuses:
+                        yield _ndjson({"type": "status", "text": s})
                     assistant_text = text
                     for i in range(0, len(assistant_text), 80):
                         yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -2412,55 +3327,37 @@ async def chat_stream(
                                 assistant_text += delta
                                 yield _ndjson({"type": "delta", "text": delta})
                         except Exception:
-                            text = await _run_generate_resilient(
-                                request,
-                                p,
-                                prompt,
-                                m,
-                                thinking_enabled=thinking_enabled,
-                                thinking_level=thinking_level,
-                            )
+                            text, statuses = await _generate_once(p, m)
+                            for s in statuses:
+                                yield _ndjson({"type": "status", "text": s})
                             assistant_text = text
                             yield _ndjson({"type": "delta", "text": assistant_text})
                     else:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         for i in range(0, len(assistant_text), 80):
                             yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
                             await asyncio.sleep(0.01)
                 else:
                     if true_streaming:
+                        if show_thinking:
+                            yield _ndjson({"type": "status", "text": f"Generation path: streaming via codex / {m}"})
                         try:
                             async for delta in _stream_codex(prompt, m):
                                 assistant_text += delta
                                 yield _ndjson({"type": "delta", "text": delta})
                         except Exception:
-                            text = await _run_generate_resilient(
-                                request,
-                                p,
-                                prompt,
-                                m,
-                                thinking_enabled=thinking_enabled,
-                                thinking_level=thinking_level,
-                            )
+                            text, statuses = await _generate_once(p, m)
+                            for s in statuses:
+                                yield _ndjson({"type": "status", "text": s})
                             assistant_text = text
                             yield _ndjson({"type": "delta", "text": assistant_text})
                     else:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         for i in range(0, len(assistant_text), 80):
                             yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -2482,38 +3379,23 @@ async def chat_stream(
                                 assistant_text += delta
                                 yield _ndjson({"type": "delta", "text": delta})
                         except Exception:
-                            text = await _run_generate_resilient(
-                                request,
-                                p,
-                                prompt,
-                                m,
-                                thinking_enabled=thinking_enabled,
-                                thinking_level=thinking_level,
-                            )
+                            text, statuses = await _generate_once(p, m)
+                            for s in statuses:
+                                yield _ndjson({"type": "status", "text": s})
                             assistant_text = text
                             yield _ndjson({"type": "delta", "text": assistant_text})
                     else:
-                        text = await _run_generate_resilient(
-                            request,
-                            p,
-                            prompt,
-                            m,
-                            thinking_enabled=thinking_enabled,
-                            thinking_level=thinking_level,
-                        )
+                        text, statuses = await _generate_once(p, m)
+                        for s in statuses:
+                            yield _ndjson({"type": "status", "text": s})
                         assistant_text = text
                         for i in range(0, len(assistant_text), 80):
                             yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
                             await asyncio.sleep(0.01)
                 else:
-                    text = await _run_generate_resilient(
-                        request,
-                        p,
-                        prompt,
-                        m,
-                        thinking_enabled=thinking_enabled,
-                        thinking_level=thinking_level,
-                    )
+                    text, statuses = await _generate_once(p, m)
+                    for s in statuses:
+                        yield _ndjson({"type": "status", "text": s})
                     assistant_text = text
                     for i in range(0, len(assistant_text), 80):
                         yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -2522,14 +3404,9 @@ async def chat_stream(
             else:
                 # Others: fallback (UI will show chunked streaming)
                 m = (model or DEFAULT_CLAUDE_MODEL).strip()
-                text = await _run_generate_resilient(
-                    request,
-                    p,
-                    prompt,
-                    m,
-                    thinking_enabled=thinking_enabled,
-                    thinking_level=thinking_level,
-                )
+                text, statuses = await _generate_once(p, m)
+                for s in statuses:
+                    yield _ndjson({"type": "status", "text": s})
                 assistant_text = text
                 for i in range(0, len(assistant_text), 80):
                     yield _ndjson({"type": "delta", "text": assistant_text[i : i + 80]})
@@ -2566,9 +3443,12 @@ async def chat_stream(
             "text": assistant_text,
             "ts": _now(),
             "sources": sources_payload,
+            "citations": citations_payload,
             "mode": mode,
             "provider": provider,
             "model": model,
+            "retrieval_mode": retrieval_mode,
+            "retrieval_depth": retrieval_depth,
         }
         history_for_breaks = _history_snapshot(owner)
         add_break = should_add_break_reminder(history_for_breaks)

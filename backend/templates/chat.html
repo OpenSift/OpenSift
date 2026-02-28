@@ -6,76 +6,109 @@
     <title>OpenSift Chat</title>
     <style>
       :root {
-        --bg: #0b1020;
-        --panel: #121a30;
-        --panel-2: #16223d;
-        --text: #e9eefc;
-        --muted: #97a6c9;
-        --line: rgba(255, 255, 255, 0.12);
-        --brand: #4f74ff;
-        --danger: #c85b5b;
+        --bg: #f3f5f8;
+        --panel: #ffffff;
+        --panel-2: #f7f8fb;
+        --text: #151a22;
+        --muted: #6c7586;
+        --line: #e4e8ef;
+        --brand: #5aa8ff;
+        --brand-soft: #eaf4ff;
+        --danger: #c13737;
       }
       * { box-sizing: border-box; }
-      html, body { height: 100%; }
+      html, body { height: 100%; overflow: hidden; }
       body {
         margin: 0;
         color: var(--text);
-        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+        font-family: "Manrope", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
         background:
-          radial-gradient(1200px 700px at -20% -25%, #2b3f84 0%, transparent 56%),
-          radial-gradient(900px 540px at 130% -10%, #20416b 0%, transparent 58%),
-          linear-gradient(180deg, #080c16 0%, #0b1020 100%);
+          radial-gradient(900px 500px at -15% -20%, #e8f3ff 0%, transparent 60%),
+          radial-gradient(850px 500px at 120% -10%, #e6eefc 0%, transparent 58%),
+          linear-gradient(180deg, #f6f8fb 0%, #f1f4f8 100%);
       }
       .app {
-        height: 100vh;
+        height: 100dvh;
         display: grid;
-        grid-template-columns: 320px 1fr;
+        grid-template-columns: 300px 1fr;
+        gap: 0;
+        overflow: hidden;
       }
       .sidebar {
         border-right: 1px solid var(--line);
-        background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+        background: linear-gradient(180deg, #fdfdfe, #f7f9fc);
         display: grid;
         grid-template-rows: auto auto auto 1fr auto;
         min-height: 0;
+        overflow: hidden;
       }
       .section {
-        padding: 12px 14px;
+        padding: 12px;
         border-bottom: 1px solid var(--line);
       }
       .brand {
-        font-size: 18px;
-        font-weight: 650;
+        font-size: 17px;
+        font-weight: 760;
+        letter-spacing: .02em;
       }
       .newchat-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-      .history-wrap { min-height: 0; overflow: auto; padding: 10px; }
+      .history-wrap { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px; }
       .history-list { display: grid; gap: 8px; }
       .ingest-stack { display: grid; gap: 8px; }
+      .flashcards-stack { display: grid; gap: 8px; }
+      .library-stack { display: grid; gap: 8px; }
       .out {
-        border: 1px dashed var(--line);
+        border: 1px solid var(--line);
         border-radius: 10px;
-        padding: 8px;
+        padding: 9px;
         white-space: pre-wrap;
         font-size: 12px;
-        background: rgba(0,0,0,.15);
+        background: var(--panel);
         color: var(--muted);
       }
       .session-item {
         border: 1px solid var(--line);
-        border-radius: 12px;
+        border-radius: 10px;
         padding: 10px;
-        background: rgba(255,255,255,.02);
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
       }
       .session-item-title { font-size: 13px; font-weight: 600; }
       .session-item-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
       .session-item-actions { margin-top: 8px; display: flex; gap: 6px; }
-      .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
+      .fc-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        background: var(--panel);
+      }
+      .fc-front { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+      .fc-back {
+        font-size: 12px;
+        color: var(--muted);
+        white-space: pre-wrap;
+        margin-bottom: 6px;
+      }
+      .fc-meta { font-size: 11px; color: var(--muted); }
+      .fc-actions {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .fc-actions button {
+        padding: 6px 8px;
+        font-size: 11px;
+      }
+      .main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
       .topbar {
         border-bottom: 1px solid var(--line);
-        padding: 10px 14px;
+        padding: 10px 16px;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
+        background: var(--panel);
       }
       .pill {
         font-size: 11px;
@@ -83,30 +116,36 @@
         border-radius: 999px;
         padding: 6px 10px;
         color: var(--muted);
+        background: #fff;
       }
-      .chat-zone { min-height: 0; display: grid; grid-template-rows: 1fr auto; }
-      .chat-scroll { min-height: 0; overflow: auto; padding: 16px 22px 8px; }
+      .chat-zone { min-height: 0; overflow: hidden; display: grid; grid-template-rows: 1fr auto; }
+      .chat-scroll { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 22px 10px; }
       .msg { display: flex; margin: 10px 0; }
       .msg.user { justify-content: flex-end; }
       .bubble {
-        max-width: min(860px, 82%);
-        border: 1px solid transparent;
-        border-radius: 14px;
-        padding: 11px 13px;
+        max-width: min(980px, 86%);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 13px;
         white-space: pre-wrap;
         word-break: break-word;
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, .05);
       }
-      .user .bubble { background: linear-gradient(180deg, #5a76ff, #4564ff); color: #fff; }
-      .assistant .bubble { background: var(--panel); border-color: var(--line); }
+      .user .bubble {
+        background: linear-gradient(180deg, #f1f8ff, #e7f3ff);
+        border-color: #cde5ff;
+      }
+      .assistant .bubble { background: var(--panel); }
       .meta { margin-top: 7px; font-size: 11px; color: var(--muted); }
       .composer {
         border-top: 1px solid var(--line);
         padding: 12px 14px;
         display: grid;
         gap: 9px;
-        background: rgba(10,15,26,.94);
+        background: linear-gradient(180deg, #fafbfd, #f5f7fb);
       }
-      .controls { display: grid; grid-template-columns: 1fr 1fr .7fr 1.2fr 120px; gap: 8px; }
+      .controls { display: grid; grid-template-columns: 1fr 1fr .7fr 1fr 1.2fr 120px; gap: 8px; }
       .toggle-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
       .toggle-row label { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
       .toggle-row input { width: auto; }
@@ -115,24 +154,82 @@
       }
       input, select, textarea {
         width: 100%;
-        color: var(--text);
+        color: #1e2430;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.04);
+        background: #fff;
         padding: 9px 10px;
       }
       textarea { min-height: 64px; resize: vertical; }
       button {
-        color: var(--text);
+        color: #1b2230;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.05);
+        background: #fff;
         padding: 9px 10px;
         cursor: pointer;
       }
-      button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
-      button.danger { background: rgba(200, 91, 91, .2); border-color: rgba(200, 91, 91, .4); }
+      button:hover { background: #f8fafc; }
+      button.primary {
+        background: linear-gradient(180deg, #68b2ff, #4f9dff);
+        border-color: #438fe7;
+        color: #fff;
+      }
+      button.danger {
+        background: #fff1f1;
+        border-color: #efb2b2;
+        color: #9f2626;
+      }
       .hint { font-size: 11px; color: var(--muted); }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(18, 24, 38, 0.35);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 999;
+        padding: 16px;
+      }
+      .modal-overlay.open { display: flex; }
+      .modal {
+        width: min(980px, 100%);
+        max-height: 88vh;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        padding: 14px;
+      }
+      .modal-title { font-size: 16px; font-weight: 650; margin-bottom: 8px; }
+      .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+      .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+      .modal-list { display: grid; gap: 8px; }
+      .preview-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: var(--panel-2);
+      }
+      .preview-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+      .preview-head input { width: auto; }
+      .preview-front { font-size: 13px; font-weight: 600; }
+      .preview-back { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+      .preview-fields { display: grid; gap: 6px; margin-top: 6px; }
+      .preview-fields input,
+      .preview-fields textarea {
+        width: 100%;
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 7px 8px;
+        font-size: 12px;
+      }
+      .preview-fields textarea {
+        min-height: 84px;
+        resize: vertical;
+      }
       @media (max-width: 900px) {
         .app { grid-template-columns: 1fr; }
         .controls { grid-template-columns: 1fr 1fr; }
@@ -142,11 +239,15 @@
   <body data-csrf="{{ csrf_token }}">
     <div class="app">
       <aside class="sidebar">
-        <div class="section"><div class="brand">OpenSift Chat</div></div>
+        <div class="section">
+          <div class="brand">OpenSift</div>
+          <div class="hint" style="margin-top:2px;">Gateway</div>
+        </div>
 
         <div class="section" style="display:flex; gap:8px;">
           <button id="refreshHistoryBtn" type="button" style="width:100%;">Refresh</button>
           <button id="settingsBtn" type="button" style="width:100%;">Settings</button>
+          <button id="libraryBtn" type="button" style="width:100%;">Library</button>
         </div>
 
         <div class="section">
@@ -171,6 +272,31 @@
             <input id="ingestFile" type="file" />
             <button id="ingestFileBtn" type="button">Upload + Ingest</button>
             <div class="out" id="ingestOut">No ingest action yet.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="hint" style="margin-bottom:6px;">Pinned Library Context</div>
+          <div class="library-stack">
+            <button id="selectLibraryBtn" type="button">Select Library Items</button>
+            <div class="out" id="libraryCtxOut">No pinned library items.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="hint" style="margin-bottom:6px;">Flashcards</div>
+          <div class="flashcards-stack">
+            <input id="flashFront" placeholder="Front (question/concept)" />
+            <input id="flashBack" placeholder="Back (answer/explanation)" />
+            <input id="flashTags" placeholder="Tags (comma-separated)" />
+            <div style="display:flex; gap:8px;">
+              <button id="flashAddBtn" type="button" class="primary" style="width:100%;">Add Card</button>
+              <button id="flashFromReplyBtn" type="button" style="width:100%;">From Last Reply</button>
+              <button id="flashRefreshBtn" type="button" style="width:100%;">Refresh</button>
+            </div>
+            <label class="hint"><input id="flashDueOnly" type="checkbox" /> Due only</label>
+            <div class="out" id="flashOut">No flashcard action yet.</div>
+            <div id="flashList" style="display:grid; gap:8px;"></div>
           </div>
         </div>
 
@@ -209,6 +335,16 @@
                 <option value="study_guide">Study Guide</option>
                 <option value="key_points">Key Points</option>
                 <option value="quiz">Quiz</option>
+              </select>
+              <select id="retrievalMode">
+                <option value="semantic_plus_pinned" selected>Retrieval: Semantic + Pinned</option>
+                <option value="semantic_only">Retrieval: Semantic Only</option>
+                <option value="pinned_only">Retrieval: Pinned Only</option>
+              </select>
+              <select id="retrievalDepth">
+                <option value="fast">Depth: Fast</option>
+                <option value="balanced" selected>Depth: Balanced</option>
+                <option value="deep">Depth: Deep</option>
               </select>
               <select id="provider">
                 <option value="claude_code" {% if preferred_provider == "claude_code" %}selected{% endif %} {% if not provider_caps.claude_code_ready %}disabled{% endif %}>
@@ -261,6 +397,33 @@
         </div>
       </main>
     </div>
+    <div id="flashPreviewModal" class="modal-overlay" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-title">Create Flashcards Preview</div>
+        <div class="modal-sub">Select the cards you want to create from the latest assistant reply.</div>
+        <div id="flashPreviewList" class="modal-list"></div>
+        <div class="modal-actions">
+          <button id="flashPreviewCancelBtn" type="button">Cancel</button>
+          <button id="flashPreviewCreateBtn" type="button" class="primary">Create Selected</button>
+        </div>
+      </div>
+    </div>
+    <div id="librarySelectModal" class="modal-overlay" aria-hidden="true">
+      <div class="modal">
+        <div class="modal-title">Select Library Context</div>
+        <div class="modal-sub">Pinned items are injected into the next prompt in addition to semantic retrieval.</div>
+        <div style="display:grid; grid-template-columns: 1fr 180px; gap:8px; margin-bottom:10px;">
+          <input id="librarySearchInput" placeholder="Search library title/preview..." />
+          <button id="libraryRefreshBtn" type="button">Refresh</button>
+        </div>
+        <div id="librarySelectList" class="modal-list"></div>
+        <div class="modal-actions">
+          <button id="librarySelectCancelBtn" type="button">Cancel</button>
+          <button id="libraryClearBtn" type="button">Clear All</button>
+          <button id="librarySelectApplyBtn" type="button" class="primary">Apply Selection</button>
+        </div>
+      </div>
+    </div>
 
     <script>
       const chat = document.getElementById("chat");
@@ -268,6 +431,8 @@
       const ownerLabel = document.getElementById("ownerLabel");
       const msgEl = document.getElementById("msg");
       const modeEl = document.getElementById("mode");
+      const retrievalModeEl = document.getElementById("retrievalMode");
+      const retrievalDepthEl = document.getElementById("retrievalDepth");
       const providerEl = document.getElementById("provider");
       const kEl = document.getElementById("k");
       const modelEl = document.getElementById("model");
@@ -280,6 +445,7 @@
       const clearBtn = document.getElementById("clearBtn");
       const logoutBtn = document.getElementById("logoutBtn");
       const settingsBtn = document.getElementById("settingsBtn");
+      const libraryBtn = document.getElementById("libraryBtn");
       const newChatBtn = document.getElementById("newChatBtn");
       const newChatNameEl = document.getElementById("newChatName");
       const refreshHistoryBtn = document.getElementById("refreshHistoryBtn");
@@ -290,8 +456,33 @@
       const ingestFileEl = document.getElementById("ingestFile");
       const ingestFileBtn = document.getElementById("ingestFileBtn");
       const ingestOutEl = document.getElementById("ingestOut");
+      const flashFrontEl = document.getElementById("flashFront");
+      const flashBackEl = document.getElementById("flashBack");
+      const flashTagsEl = document.getElementById("flashTags");
+      const flashAddBtn = document.getElementById("flashAddBtn");
+      const flashFromReplyBtn = document.getElementById("flashFromReplyBtn");
+      const flashRefreshBtn = document.getElementById("flashRefreshBtn");
+      const flashDueOnlyEl = document.getElementById("flashDueOnly");
+      const flashOutEl = document.getElementById("flashOut");
+      const flashListEl = document.getElementById("flashList");
+      const selectLibraryBtn = document.getElementById("selectLibraryBtn");
+      const libraryCtxOutEl = document.getElementById("libraryCtxOut");
+      const flashPreviewModalEl = document.getElementById("flashPreviewModal");
+      const flashPreviewListEl = document.getElementById("flashPreviewList");
+      const flashPreviewCancelBtn = document.getElementById("flashPreviewCancelBtn");
+      const flashPreviewCreateBtn = document.getElementById("flashPreviewCreateBtn");
+      const librarySelectModalEl = document.getElementById("librarySelectModal");
+      const librarySearchInputEl = document.getElementById("librarySearchInput");
+      const libraryRefreshBtn = document.getElementById("libraryRefreshBtn");
+      const librarySelectListEl = document.getElementById("librarySelectList");
+      const librarySelectCancelBtn = document.getElementById("librarySelectCancelBtn");
+      const libraryClearBtn = document.getElementById("libraryClearBtn");
+      const librarySelectApplyBtn = document.getElementById("librarySelectApplyBtn");
       const busy = document.getElementById("busy");
       const csrfToken = document.body.dataset.csrf || "";
+      let pendingFlashPreviewCards = [];
+      let selectedLibraryIds = [];
+      let libraryModalSnapshot = [];
 
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -318,6 +509,48 @@
         return normalized;
       }
 
+      function selectedLibraryKey() {
+        return `opensift_selected_library::${owner()}`;
+      }
+
+      function retrievalModeKey() {
+        return `opensift_retrieval_mode::${owner()}`;
+      }
+
+      function loadSelectedLibraryIds() {
+        try {
+          const raw = localStorage.getItem(selectedLibraryKey()) || "[]";
+          const arr = JSON.parse(raw);
+          selectedLibraryIds = Array.isArray(arr) ? arr.filter(x => typeof x === "string") : [];
+        } catch (_) {
+          selectedLibraryIds = [];
+        }
+        renderSelectedLibraryStatus();
+      }
+
+      function saveSelectedLibraryIds() {
+        localStorage.setItem(selectedLibraryKey(), JSON.stringify(selectedLibraryIds.slice(0, 8)));
+        renderSelectedLibraryStatus();
+      }
+
+      function loadRetrievalMode() {
+        const raw = (localStorage.getItem(retrievalModeKey()) || "").trim();
+        const allowed = new Set(["semantic_plus_pinned", "semantic_only", "pinned_only"]);
+        retrievalModeEl.value = allowed.has(raw) ? raw : "semantic_plus_pinned";
+      }
+
+      function saveRetrievalMode() {
+        localStorage.setItem(retrievalModeKey(), retrievalModeEl.value || "semantic_plus_pinned");
+      }
+
+      function renderSelectedLibraryStatus() {
+        if (!selectedLibraryIds.length) {
+          libraryCtxOutEl.textContent = "No pinned library items.";
+          return;
+        }
+        libraryCtxOutEl.textContent = `${selectedLibraryIds.length} pinned item(s): ${selectedLibraryIds.join(", ")}`;
+      }
+
       function addBubble(role, text, ts) {
         const row = document.createElement("div");
         row.className = "msg " + role;
@@ -326,6 +559,11 @@
         const textNode = document.createElement("div");
         textNode.textContent = text || "";
         bubble.appendChild(textNode);
+        const refsWrap = document.createElement("div");
+        refsWrap.className = "hint";
+        refsWrap.style.marginTop = "8px";
+        refsWrap.style.display = "none";
+        bubble.appendChild(refsWrap);
         const meta = document.createElement("div");
         meta.className = "meta";
         meta.textContent = ts || "";
@@ -333,7 +571,63 @@
         row.appendChild(bubble);
         chat.appendChild(row);
         scrollToBottom();
-        return { textEl: textNode, bubbleEl: bubble };
+        return { textEl: textNode, bubbleEl: bubble, refsEl: refsWrap };
+      }
+
+      function renderReferences(containerEl, sources) {
+        if (!containerEl) return;
+        containerEl.innerHTML = "";
+        const rows = Array.isArray(sources) ? sources : [];
+        if (!rows.length) {
+          containerEl.style.display = "none";
+          return;
+        }
+        containerEl.style.display = "block";
+        const title = document.createElement("div");
+        title.textContent = "References";
+        title.style.fontWeight = "600";
+        title.style.marginBottom = "4px";
+        containerEl.appendChild(title);
+
+        for (let i = 0; i < rows.length; i++) {
+          const src = rows[i] || {};
+          const line = document.createElement("div");
+          line.style.marginBottom = "2px";
+          const label = document.createElement("span");
+          const sourceName = (src.source || "source").toString();
+          const kind = (src.kind || "").toString();
+          const num = Number(src.n || (i + 1));
+          const marker = (src.label || `[${num}]`).toString();
+          const dist = src.distance === null || src.distance === undefined ? "" : ` · score ${Number(src.distance).toFixed(3)}`;
+          label.textContent = `${marker} ${sourceName}${kind ? ` (${kind})` : ""}${dist}`;
+          line.appendChild(label);
+          const sourceId = (src.source_id || "").toString().trim();
+          const sourceOwner = (src.owner || owner()).toString().trim();
+          if (sourceId) {
+            const sep = document.createElement("span");
+            sep.textContent = " — ";
+            line.appendChild(sep);
+            const preview = document.createElement("a");
+            preview.href = `/chat/library/preview?owner=${encodeURIComponent(owner())}&item_owner=${encodeURIComponent(sourceOwner)}&item_id=${encodeURIComponent(sourceId)}`;
+            preview.target = "_blank";
+            preview.rel = "noopener noreferrer";
+            preview.textContent = "open source";
+            line.appendChild(preview);
+          }
+          const url = (src.url || "").toString().trim();
+          if (url) {
+            const sep = document.createElement("span");
+            sep.textContent = " — ";
+            line.appendChild(sep);
+            const a = document.createElement("a");
+            a.href = url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = "open";
+            line.appendChild(a);
+          }
+          containerEl.appendChild(line);
+        }
       }
 
       function normalizeProviderAndModel(provider, model) {
@@ -361,7 +655,12 @@
 
       function renderHistory(messages) {
         chat.innerHTML = "";
-        for (const m of messages || []) addBubble(m.role || "assistant", m.text || "", m.ts || "");
+        for (const m of messages || []) {
+          const b = addBubble(m.role || "assistant", m.text || "", m.ts || "");
+          if ((m.role || "") === "assistant") {
+            renderReferences(b.refsEl, m.citations || m.sources || []);
+          }
+        }
       }
 
       async function sendStream() {
@@ -375,6 +674,7 @@
         setBusy(true);
 
         const a = addBubble("assistant", "", new Date().toISOString());
+        let latestSources = [];
         const statusEl = document.createElement("div");
         statusEl.className = "hint";
         statusEl.style.marginBottom = "6px";
@@ -403,11 +703,14 @@
         const normalized = normalizeProviderAndModel(providerEl.value, modelEl.value);
         form.append("provider", normalized.provider || providerEl.value);
         form.append("k", kEl.value);
+        form.append("retrieval_mode", retrievalModeEl.value || "semantic_plus_pinned");
         form.append("model", normalized.model);
+        form.append("retrieval_depth", retrievalDepthEl.value || "balanced");
         form.append("thinking_enabled", thinkingEnabledEl.checked ? "true" : "false");
         form.append("thinking_level", thinkingLevelEl.value || "medium");
         form.append("show_thinking", showThinkingEl.checked ? "true" : "false");
         form.append("true_streaming", trueStreamingEl.checked ? "true" : "false");
+        form.append("selected_library_ids", selectedLibraryIds.join(","));
         if (normalized.note) {
           statusEl.textContent = normalized.note;
           pushStatus(normalized.note);
@@ -442,8 +745,16 @@
               let evt;
               try { evt = JSON.parse(line); } catch { continue; }
               if (evt.type === "delta") a.textEl.textContent += (evt.text || "");
-              if (evt.type === "status" && showThinkingEl.checked) {
-                statusEl.textContent = evt.text || "";
+              if (evt.type === "sources") {
+                latestSources = Array.isArray(evt.sources) ? evt.sources : [];
+                renderReferences(a.refsEl, latestSources);
+              }
+              if (evt.type === "citations") {
+                latestSources = Array.isArray(evt.citations) ? evt.citations : [];
+                renderReferences(a.refsEl, latestSources);
+              }
+              if (evt.type === "status") {
+                if (showThinkingEl.checked) statusEl.textContent = evt.text || "";
                 pushStatus(evt.text || "");
               }
               if (evt.type === "error") {
@@ -493,6 +804,87 @@
           setBusy(false);
           await loadSessions();
         }
+      }
+
+      async function openLibrarySelectModal() {
+        await loadLibraryChoices();
+        librarySelectModalEl.classList.add("open");
+        librarySelectModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      function closeLibrarySelectModal() {
+        librarySelectModalEl.classList.remove("open");
+        librarySelectModalEl.setAttribute("aria-hidden", "true");
+      }
+
+      async function loadLibraryChoices() {
+        const o = owner();
+        const q = (librarySearchInputEl.value || "").trim();
+        const u = `/chat/library/list?owner=${encodeURIComponent(o)}&q=${encodeURIComponent(q)}&page=1&page_size=100&sort_by=created_at&sort_dir=desc`;
+        const res = await fetch(u);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          librarySelectListEl.innerHTML = `<div class="hint">Failed to load library sources.</div>`;
+          return;
+        }
+        const data = await res.json();
+        const items = data.items || [];
+        libraryModalSnapshot = items;
+        renderLibraryChoiceList(items);
+      }
+
+      function renderLibraryChoiceList(items) {
+        librarySelectListEl.innerHTML = "";
+        if (!items.length) {
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No library items found.";
+          librarySelectListEl.appendChild(hint);
+          return;
+        }
+        for (const item of items) {
+          const row = document.createElement("div");
+          row.className = "preview-card";
+          const head = document.createElement("div");
+          head.className = "preview-head";
+
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.dataset.id = String(item.id || "");
+          check.checked = selectedLibraryIds.includes(String(item.id || ""));
+          head.appendChild(check);
+
+          const front = document.createElement("div");
+          front.className = "preview-front";
+          front.textContent = item.title || "Untitled";
+          head.appendChild(front);
+
+          const back = document.createElement("div");
+          back.className = "preview-back";
+          back.textContent = item.preview || "";
+
+          const meta = document.createElement("div");
+          meta.className = "hint";
+          meta.textContent = `${item.kind || "item"} · ${item.folder || "(no folder)"} · ${item.tags || "(no tags)"}`;
+
+          row.appendChild(head);
+          row.appendChild(back);
+          row.appendChild(meta);
+          librarySelectListEl.appendChild(row);
+        }
+      }
+
+      function applyLibrarySelection() {
+        const checks = Array.from(librarySelectListEl.querySelectorAll('input[type="checkbox"][data-id]'));
+        const next = [];
+        for (const c of checks) {
+          if (!c.checked) continue;
+          next.push(c.dataset.id);
+          if (next.length >= 8) break;
+        }
+        selectedLibraryIds = next;
+        saveSelectedLibraryIds();
+        closeLibrarySelectModal();
       }
 
       async function clearChat() {
@@ -571,10 +963,28 @@
       }
 
       async function deleteSessionByOwner(ownerName) {
+        const reallyDelete = confirm(
+          `Delete chat '${ownerName}'?\n\nYou can choose whether to also delete linked library items in the next step.`
+        );
+        if (!reallyDelete) return;
+
+        const deleteLinkedLibrary = confirm(
+          `Also delete library items linked to '${ownerName}'?\n\nOK = delete linked library items\nCancel = keep library items`
+        );
+
         const form = new FormData();
         form.append("owner", ownerName);
+        form.append("delete_library_items", deleteLinkedLibrary ? "true" : "false");
         const res = await csrfFetch("/chat/session/delete", { method: "POST", body: form });
         if (!(await ensureAuth(res))) return;
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (deleteLinkedLibrary) {
+          const n = Number(data.deleted_library_count || 0);
+          ingestOutEl.textContent = `Deleted chat '${ownerName}' and ${n} linked library item(s).`;
+        } else {
+          ingestOutEl.textContent = `Deleted chat '${ownerName}'. Linked library items were kept.`;
+        }
         if (owner() === ownerName) chat.innerHTML = "";
         await loadSessions();
       }
@@ -625,16 +1035,390 @@
         ingestFileEl.value = "";
       }
 
+      function renderFlashcards(cards) {
+        flashListEl.innerHTML = "";
+        const rows = cards || [];
+        if (!rows.length) {
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "No flashcards for this owner.";
+          flashListEl.appendChild(hint);
+          return;
+        }
+
+        for (const c of rows) {
+          const card = document.createElement("div");
+          card.className = "fc-card";
+
+          const front = document.createElement("div");
+          front.className = "fc-front";
+          front.textContent = c.front || "(no front)";
+          card.appendChild(front);
+
+          const back = document.createElement("div");
+          back.className = "fc-back";
+          back.textContent = c.back || "";
+          back.style.display = "none";
+          card.appendChild(back);
+
+          const meta = document.createElement("div");
+          meta.className = "fc-meta";
+          const due = c.due_at ? `due: ${String(c.due_at).slice(0, 19).replace("T", " ")}` : "due: n/a";
+          const tags = c.tags ? ` | tags: ${c.tags}` : "";
+          meta.textContent = `${due}${tags}`;
+          card.appendChild(meta);
+
+          const actions = document.createElement("div");
+          actions.className = "fc-actions";
+
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.textContent = "Show Back";
+          toggleBtn.addEventListener("click", () => {
+            const hidden = back.style.display === "none";
+            back.style.display = hidden ? "block" : "none";
+            toggleBtn.textContent = hidden ? "Hide Back" : "Show Back";
+          });
+          actions.appendChild(toggleBtn);
+
+          const ratings = ["again", "hard", "good", "easy"];
+          for (const rating of ratings) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = rating;
+            btn.addEventListener("click", async () => {
+              const form = new FormData();
+              form.append("owner", owner());
+              form.append("card_id", c.id || "");
+              form.append("rating", rating);
+              const res = await csrfFetch("/chat/flashcards/review", { method: "POST", body: form });
+              if (!(await ensureAuth(res))) return;
+              const data = await res.json();
+              flashOutEl.textContent = data.ok ? `Reviewed: ${rating}` : `Review failed (${data.error || res.status})`;
+              await loadFlashcards();
+            });
+            actions.appendChild(btn);
+          }
+
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "danger";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", async () => {
+            const form = new FormData();
+            form.append("owner", owner());
+            form.append("card_id", c.id || "");
+            const res = await csrfFetch("/chat/flashcards/delete", { method: "POST", body: form });
+            if (!(await ensureAuth(res))) return;
+            const data = await res.json();
+            flashOutEl.textContent = data.ok ? "Deleted card." : `Delete failed (${data.error || res.status})`;
+            await loadFlashcards();
+          });
+          actions.appendChild(delBtn);
+
+          card.appendChild(actions);
+          flashListEl.appendChild(card);
+        }
+      }
+
+      async function loadFlashcards() {
+        const o = owner();
+        const dueOnly = flashDueOnlyEl.checked ? "true" : "false";
+        const res = await fetch(`/chat/flashcards/list?owner=${encodeURIComponent(o)}&due_only=${dueOnly}`);
+        if (!(await ensureAuth(res))) return;
+        if (!res.ok) {
+          flashOutEl.textContent = `Load failed (HTTP ${res.status}).`;
+          return;
+        }
+        const data = await res.json();
+        renderFlashcards(data.cards || []);
+      }
+
+      async function addFlashcard() {
+        const front = (flashFrontEl.value || "").trim();
+        const back = (flashBackEl.value || "").trim();
+        const tags = (flashTagsEl.value || "").trim();
+        if (!front || !back) {
+          flashOutEl.textContent = "Front and back are required.";
+          return;
+        }
+        const form = new FormData();
+        form.append("owner", owner());
+        form.append("front", front);
+        form.append("back", back);
+        form.append("tags", tags);
+        const res = await csrfFetch("/chat/flashcards/add", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return;
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          flashOutEl.textContent = `Add failed (${data.error || res.status}).`;
+          return;
+        }
+        flashFrontEl.value = "";
+        flashBackEl.value = "";
+        flashTagsEl.value = "";
+        flashOutEl.textContent = "Added flashcard.";
+        await loadFlashcards();
+      }
+
+      function makeFrontFromText(text) {
+        const line = (text || "")
+          .replace(/\s+/g, " ")
+          .replace(/^#+\s*/g, "")
+          .trim();
+        if (!line) return "From latest reply";
+        return line.slice(0, 120);
+      }
+
+      function buildFlashcardsFromReply(text) {
+        const raw = (text || "").trim();
+        if (!raw) return [];
+        const lines = raw.split(/\r?\n/);
+
+        const sections = [];
+        let currentTitle = "";
+        let currentBody = [];
+
+        const flush = () => {
+          const body = currentBody.join("\n").trim();
+          if (!body) return;
+          sections.push({
+            title: currentTitle.trim(),
+            body,
+          });
+          currentBody = [];
+        };
+
+        for (const lineRaw of lines) {
+          const line = lineRaw.trim();
+          const isMdHeading = /^#{1,6}\s+/.test(line);
+          const isColonHeading = /^[A-Z][A-Za-z0-9 ()/_-]{2,60}:$/.test(line);
+          if (isMdHeading || isColonHeading) {
+            flush();
+            currentTitle = line.replace(/^#{1,6}\s+/, "").replace(/:$/, "").trim();
+            continue;
+          }
+          currentBody.push(lineRaw);
+        }
+        flush();
+
+        // If headings were not present, fall back to paragraph blocks.
+        if (!sections.length) {
+          const blocks = raw
+            .split(/\n\s*\n+/)
+            .map((b) => b.trim())
+            .filter(Boolean);
+          for (const b of blocks) {
+            sections.push({ title: "", body: b });
+          }
+        }
+
+        const cards = [];
+        for (const s of sections) {
+          const front = s.title ? s.title.slice(0, 120) : makeFrontFromText(s.body);
+          const back = s.body.slice(0, 1500).trim();
+          if (!front || !back) continue;
+          cards.push({ front, back });
+          if (cards.length >= 8) break;
+        }
+        return cards;
+      }
+
+      async function createFlashcard(ownerName, front, back, tags = "from-chat") {
+        const form = new FormData();
+        form.append("owner", ownerName);
+        form.append("front", front);
+        form.append("back", back);
+        form.append("tags", tags);
+        const res = await csrfFetch("/chat/flashcards/add", { method: "POST", body: form });
+        if (!(await ensureAuth(res))) return { ok: false, authRedirect: true };
+        const payload = await res.json();
+        return { ok: !!(res.ok && payload.ok), error: payload.error || `HTTP ${res.status}` };
+      }
+
+      function closeFlashPreviewModal() {
+        flashPreviewModalEl.classList.remove("open");
+        flashPreviewModalEl.setAttribute("aria-hidden", "true");
+      }
+
+      function openFlashPreviewModal(cards) {
+        pendingFlashPreviewCards = cards.slice();
+        flashPreviewListEl.innerHTML = "";
+
+        for (let i = 0; i < cards.length; i++) {
+          const c = cards[i];
+          const row = document.createElement("div");
+          row.className = "preview-card";
+
+          const head = document.createElement("div");
+          head.className = "preview-head";
+
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.checked = true;
+          check.dataset.index = String(i);
+
+          const front = document.createElement("div");
+          front.className = "preview-front";
+          front.textContent = c.front || "(untitled)";
+
+          head.appendChild(check);
+          head.appendChild(front);
+          row.appendChild(head);
+
+          const fields = document.createElement("div");
+          fields.className = "preview-fields";
+
+          const frontInput = document.createElement("input");
+          frontInput.type = "text";
+          frontInput.value = c.front || "";
+          frontInput.placeholder = "Card front";
+          frontInput.dataset.field = "front";
+          frontInput.dataset.index = String(i);
+
+          const backInput = document.createElement("textarea");
+          backInput.value = c.back || "";
+          backInput.placeholder = "Card back";
+          backInput.dataset.field = "back";
+          backInput.dataset.index = String(i);
+
+          fields.appendChild(frontInput);
+          fields.appendChild(backInput);
+          row.appendChild(fields);
+
+          flashPreviewListEl.appendChild(row);
+        }
+
+        flashPreviewModalEl.classList.add("open");
+        flashPreviewModalEl.setAttribute("aria-hidden", "false");
+      }
+
+      async function createSelectedPreviewFlashcards() {
+        const o = owner();
+        const checks = Array.from(flashPreviewListEl.querySelectorAll('input[type="checkbox"][data-index]'));
+        const edited = new Map();
+        const fieldEls = Array.from(flashPreviewListEl.querySelectorAll('[data-field][data-index]'));
+        for (const el of fieldEls) {
+          const idx = Number(el.dataset.index || "-1");
+          const field = el.dataset.field || "";
+          if (idx < 0 || !field) continue;
+          if (!edited.has(idx)) edited.set(idx, { front: "", back: "" });
+          const bucket = edited.get(idx);
+          bucket[field] = (el.value || "").trim();
+        }
+
+        const selected = [];
+        for (const check of checks) {
+          if (!check.checked) continue;
+          const idx = Number(check.dataset.index || "-1");
+          if (idx >= 0 && idx < pendingFlashPreviewCards.length) {
+            const base = pendingFlashPreviewCards[idx];
+            const patch = edited.get(idx) || {};
+            const front = (patch.front || base.front || "").trim();
+            const back = (patch.back || base.back || "").trim();
+            if (!front || !back) continue;
+            selected.push({ front, back });
+          }
+        }
+        if (!selected.length) {
+          flashOutEl.textContent = "No valid cards selected (front/back are required).";
+          closeFlashPreviewModal();
+          return;
+        }
+
+        flashOutEl.textContent = `Creating ${selected.length} selected flashcard(s)...`;
+        let created = 0;
+        let failed = 0;
+        for (const card of selected) {
+          const result = await createFlashcard(o, card.front, card.back, "from-chat,auto-split");
+          if (result.authRedirect) return;
+          if (result.ok) created += 1;
+          else failed += 1;
+        }
+
+        closeFlashPreviewModal();
+        flashOutEl.textContent = `Created ${created} flashcard(s)${failed ? ` (${failed} failed)` : ""}.`;
+        await loadFlashcards();
+      }
+
+      async function addFlashcardFromLastReply() {
+        const o = owner();
+        flashOutEl.textContent = "Creating flashcards from latest assistant reply...";
+        const exp = await fetch(`/chat/session/export?owner=${encodeURIComponent(o)}`);
+        if (!(await ensureAuth(exp))) return;
+        if (!exp.ok) {
+          flashOutEl.textContent = `Load failed (HTTP ${exp.status}).`;
+          return;
+        }
+        const data = await exp.json();
+        const history = data.history || [];
+        let lastAssistantText = "";
+        for (let i = history.length - 1; i >= 0; i--) {
+          const m = history[i];
+          if (m && m.role === "assistant" && (m.text || "").trim()) {
+            lastAssistantText = (m.text || "").trim();
+            break;
+          }
+        }
+        if (!lastAssistantText) {
+          flashOutEl.textContent = "No assistant reply found for this owner.";
+          return;
+        }
+
+        const cards = buildFlashcardsFromReply(lastAssistantText);
+        if (!cards.length) {
+          flashOutEl.textContent = "Could not extract card sections from latest reply.";
+          return;
+        }
+        openFlashPreviewModal(cards);
+      }
+
       sendBtn.addEventListener("click", sendStream);
       clearBtn.addEventListener("click", clearChat);
       logoutBtn.addEventListener("click", logout);
       settingsBtn.addEventListener("click", () => {
         window.location.href = `/settings?owner=${encodeURIComponent(owner())}`;
       });
+      libraryBtn.addEventListener("click", () => {
+        window.location.href = `/library?owner=${encodeURIComponent(owner())}`;
+      });
       refreshHistoryBtn.addEventListener("click", loadSessions);
       newChatBtn.addEventListener("click", startNewChat);
       ingestUrlBtn.addEventListener("click", ingestUrl);
       ingestFileBtn.addEventListener("click", ingestFile);
+      flashAddBtn.addEventListener("click", addFlashcard);
+      flashFromReplyBtn.addEventListener("click", addFlashcardFromLastReply);
+      flashRefreshBtn.addEventListener("click", loadFlashcards);
+      flashPreviewCancelBtn.addEventListener("click", closeFlashPreviewModal);
+      flashPreviewCreateBtn.addEventListener("click", createSelectedPreviewFlashcards);
+      flashPreviewModalEl.addEventListener("click", (e) => {
+        if (e.target === flashPreviewModalEl) closeFlashPreviewModal();
+      });
+      selectLibraryBtn.addEventListener("click", openLibrarySelectModal);
+      libraryRefreshBtn.addEventListener("click", loadLibraryChoices);
+      librarySearchInputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          loadLibraryChoices();
+        }
+      });
+      librarySelectCancelBtn.addEventListener("click", closeLibrarySelectModal);
+      libraryClearBtn.addEventListener("click", () => {
+        selectedLibraryIds = [];
+        saveSelectedLibraryIds();
+        renderLibraryChoiceList(libraryModalSnapshot);
+      });
+      librarySelectApplyBtn.addEventListener("click", applyLibrarySelection);
+      librarySelectModalEl.addEventListener("click", (e) => {
+        if (e.target === librarySelectModalEl) closeLibrarySelectModal();
+      });
+      flashDueOnlyEl.addEventListener("change", loadFlashcards);
+      flashBackEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          addFlashcard();
+        }
+      });
       newChatNameEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -649,12 +1433,15 @@
       });
       ownerEl.addEventListener("change", async () => {
         owner();
+        loadSelectedLibraryIds();
+        loadRetrievalMode();
         const res = await fetch(`/chat/session/export?owner=${encodeURIComponent(owner())}`);
         if (!(await ensureAuth(res))) return;
         if (res.ok) {
           const data = await res.json();
           renderHistory(data.history || []);
         }
+        await loadFlashcards();
       });
       msgEl.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -662,10 +1449,14 @@
           sendStream();
         }
       });
+      retrievalModeEl.addEventListener("change", saveRetrievalMode);
 
       owner();
+      loadSelectedLibraryIds();
+      loadRetrievalMode();
       scrollToBottom();
       loadSessions();
+      loadFlashcards();
     </script>
   </body>
 </html>

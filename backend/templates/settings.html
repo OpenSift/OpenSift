@@ -6,25 +6,25 @@
     <title>OpenSift Settings</title>
     <style>
       :root {
-        --bg: #0b1020;
-        --panel: #121a30;
-        --panel-2: #172542;
-        --text: #e9eefc;
-        --muted: #97a6c9;
-        --line: rgba(255,255,255,.12);
-        --brand: #4f74ff;
-        --danger: #c85b5b;
+        --bg: #f3f5f8;
+        --panel: #ffffff;
+        --panel-2: #f7f8fb;
+        --text: #151a22;
+        --muted: #6c7586;
+        --line: #e4e8ef;
+        --brand: #5aa8ff;
+        --danger: #c13737;
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
       body {
         margin: 0;
         color: var(--text);
-        font-family: "Sohne", "Inter", "Avenir Next", "Segoe UI", sans-serif;
+        font-family: "Manrope", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
         background:
-          radial-gradient(1200px 700px at -20% -25%, #2b3f84 0%, transparent 56%),
-          radial-gradient(900px 540px at 130% -10%, #20416b 0%, transparent 58%),
-          linear-gradient(180deg, #080c16 0%, #0b1020 100%);
+          radial-gradient(900px 500px at -15% -20%, #e8f3ff 0%, transparent 60%),
+          radial-gradient(850px 500px at 120% -10%, #e6eefc 0%, transparent 58%),
+          linear-gradient(180deg, #f6f8fb 0%, #f1f4f8 100%);
       }
       .app {
         height: 100vh;
@@ -33,7 +33,7 @@
       }
       .sidebar {
         border-right: 1px solid var(--line);
-        background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+        background: linear-gradient(180deg, #fdfdfe, #f7f9fc);
         display: grid;
         grid-template-rows: auto auto 1fr auto;
       }
@@ -42,8 +42,9 @@
         border-bottom: 1px solid var(--line);
       }
       .brand {
-        font-size: 18px;
-        font-weight: 650;
+        font-size: 17px;
+        font-weight: 760;
+        letter-spacing: .02em;
       }
       .tab-list {
         display: grid;
@@ -53,12 +54,12 @@
         text-align: left;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.05);
+        background: #fff;
         color: var(--text);
         padding: 9px 11px;
         cursor: pointer;
       }
-      .tab-btn.active { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
+      .tab-btn.active { background: linear-gradient(180deg, #68b2ff, #4f9dff); border-color: #438fe7; color: #fff; }
       .hint { font-size: 12px; color: var(--muted); }
       .main { min-width: 0; display: grid; grid-template-rows: auto 1fr; }
       .topbar {
@@ -68,6 +69,7 @@
         justify-content: space-between;
         align-items: center;
         gap: 8px;
+        background: var(--panel);
       }
       .content {
         min-height: 0;
@@ -80,38 +82,40 @@
         border-radius: 14px;
         background: var(--panel);
         padding: 16px;
+        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
       }
       .panel.active { display: block; }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .stack { display: grid; gap: 10px; }
       .out {
-        border: 1px dashed var(--line);
+        border: 1px solid var(--line);
         border-radius: 10px;
         padding: 10px;
         white-space: pre-wrap;
         font-size: 13px;
-        background: rgba(0,0,0,.15);
+        background: var(--panel-2);
       }
       input, select, textarea, button { font: inherit; }
       input, select, textarea {
         width: 100%;
-        color: var(--text);
+        color: #1e2430;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.04);
+        background: #fff;
         padding: 9px 10px;
       }
       textarea { min-height: 120px; resize: vertical; }
       button {
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: rgba(255,255,255,.05);
-        color: var(--text);
+        background: #fff;
+        color: #1b2230;
         padding: 9px 10px;
         cursor: pointer;
       }
-      button.primary { background: linear-gradient(180deg, #5a76ff, #4564ff); border-color: var(--brand); }
-      button.danger { background: rgba(200,91,91,.2); border-color: rgba(200,91,91,.4); }
+      button:hover { background: #f8fafc; }
+      button.primary { background: linear-gradient(180deg, #68b2ff, #4f9dff); border-color: #438fe7; color: #fff; }
+      button.danger { background: #fff1f1; border-color: #efb2b2; color: #9f2626; }
       @media (max-width: 960px) {
         .app { grid-template-columns: 1fr; }
         .grid { grid-template-columns: 1fr; }
@@ -121,7 +125,10 @@
   <body data-csrf="{{ csrf_token }}">
     <div class="app">
       <aside class="sidebar">
-        <div class="section"><div class="brand">OpenSift Settings</div></div>
+        <div class="section">
+          <div class="brand">OpenSift</div>
+          <div class="hint" style="margin-top:2px;">Gateway</div>
+        </div>
         <div class="section">
           <div class="tab-list">
             <button type="button" class="tab-btn active" data-tab="authTab">Auth</button>

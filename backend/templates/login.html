@@ -5,20 +5,63 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>OpenSift Login</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #0b1020; color: #e9eefc; }
-      .wrap { max-width: 720px; margin: 0 auto; padding: 28px 18px; }
-      .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 18px; }
-      h1 { margin: 0 0 6px; font-size: 20px; }
-      .sub { opacity: .8; margin: 0 0 16px; }
-      label { display:block; font-size: 12px; opacity: .85; margin-top: 10px; }
-      input { width: 100%; padding: 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; background: rgba(255,255,255,.06); color: #e9eefc; margin-top: 6px; }
-      button { margin-top: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.10); color: #e9eefc; cursor:pointer; }
-      button.primary { background: #2a3fff; border-color: #2a3fff; color:#fff; }
+      :root {
+        --panel: #ffffff;
+        --panel-2: #f7f8fb;
+        --text: #151a22;
+        --muted: #6c7586;
+        --line: #e4e8ef;
+        --brand: #5aa8ff;
+      }
+      body {
+        font-family: "Manrope", "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+        margin: 0;
+        color: var(--text);
+        background:
+          radial-gradient(900px 500px at -15% -20%, #e8f3ff 0%, transparent 60%),
+          radial-gradient(850px 500px at 120% -10%, #e6eefc 0%, transparent 58%),
+          linear-gradient(180deg, #f6f8fb 0%, #f1f4f8 100%);
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 44px 18px; }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 1px 2px rgba(20, 29, 43, 0.06);
+      }
+      h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: .02em; }
+      .sub { color: var(--muted); margin: 0 0 16px; }
+      label { display:block; font-size: 12px; color: var(--muted); margin-top: 10px; }
+      input {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        color: var(--text);
+        margin-top: 6px;
+      }
+      button {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: #1b2230;
+        cursor:pointer;
+      }
+      button:hover { background: #f8fafc; }
+      button.primary {
+        background: linear-gradient(180deg, #68b2ff, #4f9dff);
+        border-color: #438fe7;
+        color:#fff;
+      }
       .row { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      .hint { font-size: 12px; opacity: .75; margin-top: 10px; }
-      .error { background: rgba(255,70,70,.12); border: 1px solid rgba(255,70,70,.35); padding: 10px 12px; border-radius: 12px; margin: 12px 0; }
-      code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 8px; }
-      a { color: #9fb0ff; text-decoration: none; }
+      .hint { font-size: 12px; color: var(--muted); margin-top: 10px; }
+      .error { background: #fff1f1; border: 1px solid #efb2b2; color: #9f2626; padding: 10px 12px; border-radius: 12px; margin: 12px 0; }
+      code { background: var(--panel-2); padding: 2px 6px; border-radius: 8px; }
+      a { color: #3279c9; text-decoration: none; }
       .split { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
       @media (max-width: 780px){
         .row, .split { grid-template-columns: 1fr; }
@@ -29,6 +72,7 @@
     <div class="wrap">
       <div class="card">
         <h1>OpenSift</h1>
+        <div class="hint" style="margin-bottom:2px;">Gateway</div>
         <p class="sub">Local-only access. Authenticate with a token or password.</p>
 
         {% if error %}
