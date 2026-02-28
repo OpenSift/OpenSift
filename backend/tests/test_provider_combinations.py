@@ -253,3 +253,121 @@ def test_cli_run_generate_falls_back_from_codex_to_openai(monkeypatch) -> None:
     monkeypatch.setattr(cli_chat, "generate_with_openai", lambda prompt, model=None: "openai-fallback")
     out = cli_chat._run_generate(cfg, "hello")
     assert out == "openai-fallback"
+
+
+@pytest.mark.parametrize(
+    "provider,expected_used",
+    [
+        ("openai", "openai"),
+        ("claude", "claude"),
+        ("claude_code", "claude_code"),
+        ("codex", "codex"),
+    ],
+)
+def test_ui_run_generate_result_primary_provider_matrix(monkeypatch, provider: str, expected_used: str) -> None:
+    _clear_provider_env(monkeypatch)
+    monkeypatch.setattr(ui_app, "claude_code_cli_available", lambda: True)
+    monkeypatch.setattr(ui_app, "codex_cli_available", lambda: True)
+    monkeypatch.setattr(ui_app, "codex_auth_detected", lambda: True)
+
+    monkeypatch.setattr(ui_app, "generate_with_openai", lambda prompt, model=None: "openai-ok")
+    monkeypatch.setattr(
+        ui_app,
+        "generate_with_claude",
+        lambda prompt, model=None, thinking_enabled=False, thinking_level="medium": "claude-ok",
+    )
+    monkeypatch.setattr(ui_app, "generate_with_claude_code", lambda prompt, model=None: "claude-code-ok")
+    monkeypatch.setattr(ui_app, "generate_with_codex", lambda prompt, model=None: "codex-ok")
+
+    result = ui_app._run_generate_result(provider, "hello", model="")
+    assert result["provider_used"] == expected_used
+    assert result["fallback_used"] is False
+    assert (result["text"] or "").strip()
+
+
+def test_ui_run_generate_result_claude_code_fallback_priority_order(monkeypatch) -> None:
+    _clear_provider_env(monkeypatch)
+    monkeypatch.setattr(ui_app, "claude_code_cli_available", lambda: False)
+    monkeypatch.setattr(ui_app, "codex_cli_available", lambda: True)
+    monkeypatch.setattr(ui_app, "codex_auth_detected", lambda: True)
+
+    calls = []
+    monkeypatch.setattr(
+        ui_app,
+        "generate_with_claude",
+        lambda prompt, model=None, thinking_enabled=False, thinking_level="medium": calls.append("claude") or "claude-fallback",
+    )
+    monkeypatch.setattr(ui_app, "generate_with_codex", lambda prompt, model=None: calls.append("codex") or "codex-fallback")
+    monkeypatch.setattr(ui_app, "generate_with_openai", lambda prompt, model=None: calls.append("openai") or "openai-fallback")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    result = ui_app._run_generate_result("claude_code", "q", model="")
+    assert result["provider_used"] == "claude"
+    assert calls == ["claude"]
+
+    _clear_provider_env(monkeypatch)
+    calls.clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    result2 = ui_app._run_generate_result("claude_code", "q", model="")
+    assert result2["provider_used"] == "codex"
+    assert calls == ["codex"]
+
+    monkeypatch.setattr(ui_app, "codex_cli_available", lambda: False)
+    calls.clear()
+    result3 = ui_app._run_generate_result("claude_code", "q", model="")
+    assert result3["provider_used"] == "openai"
+    assert calls == ["openai"]
+
+
+def test_ui_run_generate_result_codex_empty_output_falls_back_to_openai(monkeypatch) -> None:
+    _clear_provider_env(monkeypatch)
+    monkeypatch.setattr(ui_app, "codex_cli_available", lambda: True)
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.setattr(ui_app, "generate_with_codex", lambda prompt, model=None: "")
+    monkeypatch.setattr(ui_app, "generate_with_openai", lambda prompt, model=None: "openai-fallback")
+
+    result = ui_app._run_generate_result("codex", "hello", model="")
+    assert result["provider_used"] == "openai"
+    assert result["fallback_used"] is True
+    assert result["text"] == "openai-fallback"
+    assert any("Codex CLI failed" in d for d in result["diagnostics"])
+
+
+@pytest.mark.parametrize(
+    "provider,setup_key,expected_err_prefix",
+    [
+        ("openai", "", "Generation failed for OpenAI."),
+        ("claude", "", "Generation failed for Claude API."),
+        ("codex", "", "Generation failed for Codex path."),
+        ("claude_code", "", "Generation failed for Claude Code path."),
+    ],
+)
+def test_ui_run_generate_result_empty_output_fails_deterministically(
+    monkeypatch,
+    provider: str,
+    setup_key: str,
+    expected_err_prefix: str,
+) -> None:
+    _clear_provider_env(monkeypatch)
+    monkeypatch.setattr(ui_app, "claude_code_cli_available", lambda: provider == "claude_code")
+    monkeypatch.setattr(ui_app, "codex_cli_available", lambda: provider == "codex")
+    monkeypatch.setattr(ui_app, "codex_auth_detected", lambda: provider == "codex")
+
+    monkeypatch.setattr(ui_app, "generate_with_openai", lambda prompt, model=None: "")
+    monkeypatch.setattr(
+        ui_app,
+        "generate_with_claude",
+        lambda prompt, model=None, thinking_enabled=False, thinking_level="medium": "",
+    )
+    monkeypatch.setattr(ui_app, "generate_with_claude_code", lambda prompt, model=None: "")
+    monkeypatch.setattr(ui_app, "generate_with_codex", lambda prompt, model=None: "")
+
+    if setup_key:
+        monkeypatch.setenv(setup_key, "x")
+
+    with pytest.raises(RuntimeError) as exc:
+        ui_app._run_generate_result(provider, "question", model="")
+    text = str(exc.value)
+    assert text.startswith(expected_err_prefix)
+    assert "empty output" in text
