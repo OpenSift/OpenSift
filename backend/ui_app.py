@@ -95,7 +95,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.6.1-alpha"
+OPENSIFT_VERSION = "1.6.2-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
@@ -558,9 +558,9 @@ async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
 
 
 def _sanitize_post_params(mode: str, provider: str, k: int, history_turns: int) -> Tuple[str, str, int, int]:
-    mode_clean = (mode or "study_guide").strip().lower()
+    mode_clean = (mode or "study_chat").strip().lower()
     provider_clean = (provider or "claude_code").strip().lower()
-    if mode_clean not in ("study_guide", "key_points", "quiz", "explain"):
+    if mode_clean not in ("study_chat", "assignment_planner", "study_guide", "key_points", "quiz", "explain"):
         raise ValueError("invalid_mode")
     if provider_clean not in ("openai", "claude", "claude_code", "codex"):
         raise ValueError("invalid_provider")
@@ -3250,7 +3250,7 @@ async def chat_stream(
     request: Request,
     owner: str = Form("default"),
     message: str = Form(...),
-    mode: str = Form("study_guide"),
+    mode: str = Form("study_chat"),
     provider: str = Form("claude_code"),  # openai | claude | claude_code | codex
     model: str = Form(""),
     retrieval_mode: str = Form("semantic_plus_pinned"),

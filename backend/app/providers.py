@@ -48,7 +48,7 @@ def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]], study_st
     Build a single text prompt used across providers.
     `passages` items: {"text": "...", "meta": {...}}
     """
-    mode = (mode or "study_guide").strip()
+    mode = (mode or "study_chat").strip()
 
     context_blocks = []
     for i, p in enumerate(passages[:12], start=1):
@@ -66,9 +66,23 @@ def build_prompt(mode: str, query: str, passages: List[Dict[str, Any]], study_st
     context = "\n\n".join(context_blocks).strip()
 
     instructions = {
+        "study_chat": (
+            "You are OpenSift, an AI study coach. Using ONLY the provided context, answer the user's question directly "
+            "and conversationally. For complex questions, give a clear recommendation, explain why, and provide concrete "
+            "next steps the student can take."
+        ),
+        "assignment_planner": (
+            "You are OpenSift, an AI study planner. Using ONLY the provided context, create a practical plan for the "
+            "student's assignment or exam prep. Include immediate next steps, a short timeline with milestones, and a "
+            "prioritized checklist that is realistic for the stated workload."
+        ),
         "study_guide": (
             "You are OpenSift, an AI study buddy. Using ONLY the provided context, "
             "explain clearly, structure into sections, and include a short summary + key terms."
+        ),
+        "key_points": (
+            "You are OpenSift. Using ONLY the provided context, extract the most important key points as concise bullets, "
+            "ordered from foundational to advanced."
         ),
         "quiz": (
             "You are OpenSift. Using ONLY the provided context, create a quiz (mix of MCQ and short answer) "

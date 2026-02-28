@@ -354,6 +354,8 @@
           <div class="composer">
             <div class="controls">
               <select id="mode">
+                <option value="study_chat" selected>Study Chat</option>
+                <option value="assignment_planner">Assignment Planner</option>
                 <option value="study_guide">Study Guide</option>
                 <option value="key_points">Key Points</option>
                 <option value="quiz">Quiz</option>
@@ -408,7 +410,7 @@
               <label><input id="trueStreaming" type="checkbox" checked /> True streaming</label>
             </div>
 
-            <textarea id="msg" placeholder="Ask OpenSift... (Shift+Enter newline)"></textarea>
+            <textarea id="msg" placeholder="Ask complex questions about your study material... (Shift+Enter newline)"></textarea>
             {% if not provider_caps.any_provider_ready %}
             <div class="hint">
               No LLM provider is ready in this container. Install `claude`/`codex` inside the image, or set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in `/app/.env`.

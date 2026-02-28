@@ -6,6 +6,7 @@ import cli_chat
 import opensift
 import pytest
 import ui_app
+from app.providers import build_prompt
 
 
 def _clear_provider_env(monkeypatch) -> None:
@@ -253,3 +254,44 @@ def test_cli_run_generate_falls_back_from_codex_to_openai(monkeypatch) -> None:
     monkeypatch.setattr(cli_chat, "generate_with_openai", lambda prompt, model=None: "openai-fallback")
     out = cli_chat._run_generate(cfg, "hello")
     assert out == "openai-fallback"
+
+
+def test_ui_sanitize_post_params_accepts_study_chat() -> None:
+    mode, provider, k, turns = ui_app._sanitize_post_params("study_chat", "claude_code", 8, 10)
+    assert mode == "study_chat"
+    assert provider == "claude_code"
+    assert k == 8
+    assert turns == 10
+
+
+def test_ui_sanitize_post_params_accepts_assignment_planner() -> None:
+    mode, provider, k, turns = ui_app._sanitize_post_params("assignment_planner", "claude_code", 8, 10)
+    assert mode == "assignment_planner"
+    assert provider == "claude_code"
+    assert k == 8
+    assert turns == 10
+
+
+def test_build_prompt_study_chat_contains_complex_question_guidance() -> None:
+    prompt = build_prompt(
+        mode="study_chat",
+        query="Based on this guide, what should I study next?",
+        passages=[{"text": "Mitosis has four stages.", "meta": {"source": "bio.pdf", "kind": "pdf"}}],
+        study_style="Prefer concise bullet points.",
+    )
+    assert "AI study coach" in prompt
+    assert "complex questions" in prompt
+    assert "concrete next steps" in prompt
+    assert "Based on this guide" in prompt
+
+
+def test_build_prompt_assignment_planner_contains_timeline_guidance() -> None:
+    prompt = build_prompt(
+        mode="assignment_planner",
+        query="I have a midterm in 7 days. What should I do next?",
+        passages=[{"text": "Cell respiration includes glycolysis and Krebs cycle.", "meta": {"source": "bio.pdf", "kind": "pdf"}}],
+        study_style="Prefer daily plans.",
+    )
+    assert "AI study planner" in prompt
+    assert "timeline with milestones" in prompt
+    assert "prioritized checklist" in prompt

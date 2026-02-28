@@ -45,7 +45,7 @@ logger = configure_logging("opensift.cli")
 @dataclass
 class ChatConfig:
     owner: str = "default"
-    mode: str = "study_guide"
+    mode: str = "study_chat"
     provider: str = "claude_code"  # openai | claude | claude_code | codex
     model: str = ""
     k: int = 8
@@ -64,7 +64,7 @@ Commands:
   /help
   /quit
   /owner <name>
-  /mode <mode>
+  /mode <mode>                  study_chat | assignment_planner | study_guide | key_points | quiz | explain
   /provider <p>                 openai | claude | claude_code | codex
   /model <name>                 Model override (empty = default)
   /k <num>
@@ -749,7 +749,7 @@ async def repl(cfg: ChatConfig) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenSift Terminal Chat")
     parser.add_argument("--owner", default="default", help="Owner/namespace (default: default)")
-    parser.add_argument("--mode", default="study_guide", help="Mode (default: study_guide)")
+    parser.add_argument("--mode", default="study_chat", help="Mode (default: study_chat)")
     parser.add_argument("--provider", default="claude_code", choices=["openai", "claude", "claude_code", "codex"])
     parser.add_argument("--model", default="", help="Model override (optional)")
     parser.add_argument("--k", type=int, default=8, help="Top-k retrieval (default: 8)")

@@ -1,5 +1,48 @@
 # OpenSift Release Notes
 
+## v1.6.2-alpha
+Release date: 2026-02-28
+
+This release focuses on stability fixes for Library/PDF workflows and broadens chat behavior beyond rigid study-guide generation.
+
+### Highlights
+- Restored full Library controls and interaction model after PDF-preview compatibility updates.
+- Fixed JavaScript wiring regressions that removed batch controls and broke library upload/preview behavior.
+- Added first-class conversational study mode (`study_chat`) so users can ask complex, recommendation-style questions grounded in ingested materials.
+- Added assignment planning mode (`assignment_planner`) for timeline/milestone/checklist responses from study context.
+- Improved ingest diagnostics visibility and hardened error-response handling to avoid exposing raw exception details.
+
+### Added
+- New chat modes:
+  - `study_chat` (default)
+  - `assignment_planner`
+- UI mode selector updates in chat for the new modes.
+- Test coverage for:
+  - provider/mode combinations
+  - mode sanitizer acceptance
+  - prompt guidance expectations for new modes
+  - UI mode-option rendering
+
+### Changed
+- Library page:
+  - restored complete control set (search/filter/details + batch actions)
+  - restored inline PDF preview pane behavior and fallback actions
+  - fixed missing selection state wiring that caused front-end runtime failure
+- Backend mode defaults:
+  - web chat default mode changed from `study_guide` to `study_chat`
+  - CLI and MCP defaults aligned to `study_chat`
+- Security hardening:
+  - removed raw `str(e)` exception text from ingest error responses where client-visible
+  - retained internal diagnostics/logging for server-side troubleshooting
+
+### Validation
+- Backend test suite pass: `85 passed` (local run).
+
+### Versioning
+- Bumped app version to `1.6.2-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
 ## v1.6.1-alpha
 Release date: 2026-02-28
 
