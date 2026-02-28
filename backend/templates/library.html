@@ -107,6 +107,32 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .diag-panel {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        padding: 12px;
+      }
+      .diag-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .diag-title {
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .diag-out {
+        margin: 0;
+        white-space: pre-wrap;
+        font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 12px;
+        max-height: 300px;
+        overflow: auto;
+      }
       .legacy-controls {
         display: none;
       }
@@ -161,6 +187,14 @@
         </div>
       </div>
 
+      <div class="diag-panel" aria-live="polite">
+        <div class="diag-head">
+          <div class="diag-title">Latest Ingest Diagnostics</div>
+          <button id="refreshDiagBtn" class="btn" type="button">Refresh</button>
+        </div>
+        <pre id="ingestDiagOut" class="diag-out">Loading latest diagnostics...</pre>
+      </div>
+
       <div class="legacy-controls" aria-hidden="true">
         <input id="allOwnersToggle" type="checkbox" />
         <button id="saveNoteBtn" type="button"></button>
@@ -182,6 +216,8 @@
     <script>
       const frame = document.getElementById("pdfFrame");
       const banner = document.getElementById("compatBanner");
+      const diagOut = document.getElementById("ingestDiagOut");
+      const refreshDiagBtn = document.getElementById("refreshDiagBtn");
 
       if (frame && banner) {
         let loaded = false;
@@ -213,6 +249,45 @@
         // Some blocked embeds never trigger error; treat long stall as compatibility failure.
         timer = setTimeout(showBlocked, 4500);
       }
+
+      function renderDiagnostics(diag) {
+        if (!diagOut) return;
+        if (!diag || typeof diag !== "object") {
+          diagOut.textContent = "No ingest diagnostics yet.";
+          return;
+        }
+        const compact = {
+          status: diag.status || "unknown",
+          source: diag.source || "",
+          updated_at: diag.updated_at || "",
+          parser: diag.parser || {},
+          chunk: diag.chunk || {},
+          index: diag.index || {},
+          error: diag.error || {},
+          duration_ms: diag.duration_ms ?? null,
+          message: diag.message || "",
+        };
+        diagOut.textContent = JSON.stringify(compact, null, 2);
+      }
+
+      async function loadLatestDiagnostics() {
+        try {
+          const res = await fetch(`/chat/ingest/diagnostics/latest?owner=${encodeURIComponent("{{ owner }}")}`);
+          if (!res.ok) {
+            renderDiagnostics(null);
+            return;
+          }
+          const data = await res.json();
+          renderDiagnostics(data?.diagnostics || null);
+        } catch (_) {
+          renderDiagnostics(null);
+        }
+      }
+
+      if (refreshDiagBtn) {
+        refreshDiagBtn.addEventListener("click", loadLatestDiagnostics);
+      }
+      loadLatestDiagnostics();
     </script>
   </body>
 </html>
