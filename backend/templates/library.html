@@ -65,6 +65,15 @@
         grid-template-columns: 1fr 160px 160px 180px 100px 100px 140px;
         gap: 8px;
       }
+      .batchbar {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 14px;
+        display: grid;
+        grid-template-columns: auto 180px 220px auto auto auto auto;
+        gap: 8px;
+        align-items: center;
+        background: #f8fbff;
+      }
       .presets {
         border-bottom: 1px solid var(--line);
         padding: 10px 14px;
@@ -282,6 +291,15 @@
           <button id="applyPresetBtn" type="button">Apply</button>
           <button id="deletePresetBtn" type="button" class="danger">Delete</button>
         </div>
+        <div class="batchbar">
+          <label class="hint"><input id="selectAllPage" type="checkbox" /> Select page</label>
+          <input id="batchMoveFolder" placeholder="Move selected to folder..." />
+          <input id="batchTagValue" placeholder="Set selected tags (comma-separated)" />
+          <button id="batchMoveBtn" type="button">Move</button>
+          <button id="batchTagBtn" type="button">Set Tags</button>
+          <button id="batchExportBtn" type="button">Export</button>
+          <button id="batchDeleteBtn" type="button" class="danger">Delete</button>
+        </div>
         <div class="content">
           <section id="listPane" class="list-pane"></section>
           <section class="details">
@@ -342,6 +360,13 @@
       const savePresetBtn = document.getElementById("savePresetBtn");
       const applyPresetBtn = document.getElementById("applyPresetBtn");
       const deletePresetBtn = document.getElementById("deletePresetBtn");
+      const selectAllPageEl = document.getElementById("selectAllPage");
+      const batchMoveFolderEl = document.getElementById("batchMoveFolder");
+      const batchTagValueEl = document.getElementById("batchTagValue");
+      const batchMoveBtn = document.getElementById("batchMoveBtn");
+      const batchTagBtn = document.getElementById("batchTagBtn");
+      const batchExportBtn = document.getElementById("batchExportBtn");
+      const batchDeleteBtn = document.getElementById("batchDeleteBtn");
 
       let selectedItemId = "";
       let currentPage = 1;
@@ -349,6 +374,7 @@
       let libraryItemCache = {};
       let presetMap = {};
       let pendingFolderFilter = "";
+      let selectedItemIds = new Set();
 
       function csrfFetch(url, options = {}) {
         const headers = new Headers(options.headers || {});
@@ -396,6 +422,25 @@
 
       function setOut(text) {
         actionOutEl.textContent = text || "";
+      }
+
+      function selectedItems() {
+        const out = [];
+        for (const id of selectedItemIds) {
+          const item = libraryItemCache[id];
+          if (item) out.push(item);
+        }
+        return out;
+      }
+
+      function updateSelectionUI() {
+        const count = selectedItems().length;
+        if (count > 0) {
+          setOut(`${count} selected item(s).`);
+        }
+        const pageIds = Object.keys(libraryItemCache);
+        const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedItemIds.has(id));
+        if (selectAllPageEl) selectAllPageEl.checked = allOnPageSelected;
       }
 
       function presetStorageKey() {
