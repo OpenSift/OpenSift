@@ -95,7 +95,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.6.1-alpha"
+OPENSIFT_VERSION = "1.6.2-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
@@ -558,9 +558,9 @@ async def _read_upload_limited(file: UploadFile, max_bytes: int) -> bytes:
 
 
 def _sanitize_post_params(mode: str, provider: str, k: int, history_turns: int) -> Tuple[str, str, int, int]:
-    mode_clean = (mode or "study_guide").strip().lower()
+    mode_clean = (mode or "study_chat").strip().lower()
     provider_clean = (provider or "claude_code").strip().lower()
-    if mode_clean not in ("study_guide", "key_points", "quiz", "explain"):
+    if mode_clean not in ("study_chat", "assignment_planner", "study_guide", "key_points", "quiz", "explain"):
         raise ValueError("invalid_mode")
     if provider_clean not in ("openai", "claude", "claude_code", "codex"):
         raise ValueError("invalid_provider")
@@ -1746,26 +1746,16 @@ async def settings_page(request: Request, owner: str = "default"):
 
 
 @app.get("/library", response_class=HTMLResponse)
-async def library_page(request: Request, owner: str = "default", pdf_url: str = "", title: str = ""):
+async def library_page(request: Request, owner: str = "default"):
     owner = _normalize_owner(owner)
-    raw_url = (pdf_url or "").strip()
-    safe_pdf_url = ""
-    if raw_url:
-        parsed = urlparse(raw_url)
-        if parsed.scheme in ("http", "https") and parsed.netloc:
-            safe_pdf_url = raw_url
-
-    display_title = (title or "").strip() or "PDF Preview"
     csrf_token = _csrf_token_for_request(request)
     response = templates.TemplateResponse(
+        request,
         "library.html",
         {
             "request": request,
             "owner": owner,
             "csrf_token": csrf_token,
-            "pdf_url": safe_pdf_url,
-            "title": display_title,
-            "has_pdf_url": bool(safe_pdf_url),
         },
     )
     _set_csrf_cookie(response, request, csrf_token)
@@ -3260,7 +3250,7 @@ async def chat_stream(
     request: Request,
     owner: str = Form("default"),
     message: str = Form(...),
-    mode: str = Form("study_guide"),
+    mode: str = Form("study_chat"),
     provider: str = Form("claude_code"),  # openai | claude | claude_code | codex
     model: str = Form(""),
     retrieval_mode: str = Form("semantic_plus_pinned"),

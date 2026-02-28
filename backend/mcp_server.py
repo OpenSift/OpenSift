@@ -166,7 +166,7 @@ async def search(
 @mcp.tool()
 async def sift_generate(
     query: str,
-    mode: str = "study_guide",
+    mode: str = "study_chat",
     k: int = 8,
     owner: Optional[str] = None,
     provider: str = "openai",  # "openai" | "claude" | "claude_code" | "codex"

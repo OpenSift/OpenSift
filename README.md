@@ -23,7 +23,9 @@ OpenSift helps by:
 - Finding only the most relevant sections
 - Grounding AI responses in your materials
 - Streaming answers in real-time
-- Generating structured study guides and quizzes
+- Supporting conversational study Q&A (`Study Chat`) with concrete recommendations and next steps
+- Generating assignment-focused study plans (`Assignment Planner`) with milestones and prioritized checklists
+- Generating structured study guides, key points, and quizzes
 
 ---
 
@@ -184,12 +186,32 @@ Example: separate class namespace + quiz mode:
 ```
 python opensift.py terminal --provider claude_code --owner bio101 --mode quiz
 ```
+Example: open-ended study coaching mode:
+
+```bash
+python opensift.py terminal --provider claude_code --owner bio101 --mode study_chat
+```
+
+Example: deadline-aware planning mode:
+
+```bash
+python opensift.py terminal --provider claude_code --owner bio101 --mode assignment_planner
+```
+
 Then inside the terminal chat:
 	•	Ingest a URL:
 /ingest url https://en.wikipedia.org/wiki/Photosynthesis
 	•	Ingest a file:
 /ingest file /path/to/chapter1.pdf
 	•	Ask questions normally.
+
+Supported chat modes (UI + terminal + MCP prompt builder):
+- `study_chat` (default): open-ended, context-grounded study conversation and recommendations
+- `assignment_planner`: concrete plan with next steps, short timeline, and checklist
+- `study_guide`: structured guide output
+- `key_points`: concise key concepts
+- `quiz`: quiz + answer key
+- `explain`: layered explanation with misconceptions
 
 ### 4.b Old Method:
 
@@ -263,7 +285,7 @@ Docker notes:
 Image versioning notes:
 - Local `docker compose` builds are tagged as `opensift-opensift-gateway:latest`.
 - For external publishing, use version-aligned tags, e.g.:
-  - `ghcr.io/opensift/opensift-gateway:1.6.0-alpha`
+  - `ghcr.io/opensift/opensift-gateway:1.6.2-alpha`
   - `ghcr.io/opensift/opensift-gateway:latest`
 
 
