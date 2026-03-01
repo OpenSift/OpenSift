@@ -1,5 +1,43 @@
 # OpenSift Release Notes
 
+## v1.6.3-alpha
+Release date: 2026-03-01
+
+Security advisory release focused on remediation and hardening for URL ingest, path safety, exception/token exposure, and dependency risk.
+
+### Security Advisories (Draft GHSA)
+- SSRF hardening: `GHSA-635w-m3f9-gc48`
+- Path containment hardening: `GHSA-27x2-x9f5-xvp9`
+- Information disclosure hardening: `GHSA-h9x2-8x59-m6mh`
+- Vulnerable dependency set remediation: `GHSA-7wrf-jc6p-ffm5`
+
+### Highlights
+- Hardened URL ingest destination controls:
+  - reject embedded credentials in URLs
+  - allow only ports `80/443`
+  - reject cross-host redirects during ingest
+- Hardened owner-scoped file path handling and base-dir containment checks across storage modules.
+- Sanitized API/MCP error responses to avoid leaking raw exception details.
+- Removed full generated token exposure from login/settings UX and token-rotation responses.
+- Removed non-empty `innerHTML` assignment in chat template flagged by security audit.
+
+### Dependency Security Updates
+- `python-multipart`: `0.0.9` -> `0.0.22`
+- `mcp`: `1.2.0` -> `1.23.0`
+- `pypdf`: `4.3.1` -> `6.7.4`
+- `jinja2`: `3.1.4` -> `3.1.6`
+- `httpx`: `0.27.0` -> `0.27.2` (compatibility with updated `mcp`)
+- `uvicorn[standard]`: `0.30.6` -> `0.31.1` (compatibility with updated `mcp`)
+
+### Validation
+- Backend test suite pass: `99 passed` (local run).
+- Security audit after patch set: `high=0` (remaining warnings are environment/ops posture).
+
+### Versioning
+- Bumped app version to `1.6.3-alpha` in:
+  - `backend/opensift.py`
+  - `backend/ui_app.py`
+
 ## v1.6.2-alpha
 Release date: 2026-02-28
 
