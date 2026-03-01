@@ -81,8 +81,10 @@
 
         {% if mode == "set_password" %}
           <form method="post" action="/set-password">
-            <label>Generated Token (required to set password)</label>
+            {% if has_password %}
+            <label>Generated Token (required to reset existing password)</label>
             <input name="token" placeholder="Paste generated token…" required />
+            {% endif %}
 
             <div class="row">
               <div>
@@ -101,10 +103,7 @@
               Stores a salted password hash in <code>.opensift_auth.json</code> (backend directory).
             </div>
 
-            <div class="hint">
-              Generated token (also printed in server logs):<br/>
-              <code>{{ token }}</code>
-            </div>
+            <div class="hint">For token-based reset flows, retrieve the token from your secure server-side source.</div>
 
             <div class="hint"><a href="/login">Back to login</a></div>
           </form>
@@ -124,10 +123,7 @@
 
             <button class="primary" type="submit">Login</button>
 
-            <div class="hint">
-              Generated token (also printed in server logs):<br/>
-              <code>{{ token }}</code>
-            </div>
+            <div class="hint">Token values are no longer rendered in this page.</div>
 
             <div class="hint">
               {% if has_password %}

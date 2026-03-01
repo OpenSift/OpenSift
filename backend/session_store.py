@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+from pathlib import Path
 from typing import Any, Dict, List
 
 from app.atomic_io import atomic_write_json, path_lock
@@ -18,9 +19,19 @@ def _safe_owner(owner: str) -> str:
     return owner[:128]
 
 
+def _resolve_under_base(base_dir: str, name: str) -> str:
+    base = Path(base_dir).resolve()
+    candidate = (base / name).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as e:
+        raise ValueError("path_outside_base_dir") from e
+    return str(candidate)
+
+
 def session_path(owner: str, base_dir: str = DEFAULT_DIR) -> str:
     os.makedirs(base_dir, exist_ok=True)
-    return os.path.join(base_dir, f"{_safe_owner(owner)}.json")
+    return _resolve_under_base(base_dir, f"{_safe_owner(owner)}.json")
 
 
 def load_session(owner: str, base_dir: str = DEFAULT_DIR) -> List[Dict[str, Any]]:

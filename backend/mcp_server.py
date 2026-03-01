@@ -191,11 +191,12 @@ async def sift_generate(
             out = await anyio.to_thread.run_sync(lambda: generate_with_claude(prompt, model=model or "claude-3-5-sonnet-latest"))
         else:
             out = await anyio.to_thread.run_sync(lambda: generate_with_openai(prompt, model=model or "gpt-4.1-mini"))
-    except Exception as e:
+    except Exception:
         logger.exception("mcp_sift_generate_failed owner=%s provider=%s", owner, provider)
         return {
             "ok": False,
-            "error": str(e),
+            "error": "generation_failed",
+            "message": "Generation failed for the selected provider.",
             "hint": "If you're using Codex, call `search` and let Codex generate the final response.",
             "sources": res["results"],
         }

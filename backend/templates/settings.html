@@ -321,7 +321,7 @@
           return;
         }
         const data = await res.json();
-        document.getElementById("tokenOut").textContent = `New token (save now): ${data.token}`;
+        document.getElementById("tokenOut").textContent = `Token rotated. New hint: ***${data.token_hint || ""}`;
         await loadAuthInfo();
       });
 

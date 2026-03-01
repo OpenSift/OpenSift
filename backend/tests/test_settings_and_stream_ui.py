@@ -315,3 +315,13 @@ def test_settings_provider_install_stream_endpoint(monkeypatch) -> None:
     assert events[0]["type"] == "start"
     assert events[1]["type"] == "progress"
     assert events[-1]["type"] == "done"
+
+
+def test_rotate_token_does_not_return_full_token(monkeypatch) -> None:
+    client = _authed_client(monkeypatch)
+    resp = client.post("/chat/settings/auth/token/rotate")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["ok"] is True
+    assert "token" not in payload
+    assert isinstance(payload.get("token_hint"), str)

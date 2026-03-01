@@ -1530,7 +1530,7 @@ async def login_page(request: Request):
     response = templates.TemplateResponse(
         request,
         "login.html",
-        {"request": request, "mode": "login", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
+        {"request": request, "mode": "login", "has_password": _has_password(), "error": None},
     )
     _set_csrf_cookie(response, request, _csrf_token_for_request(request))
     return response
@@ -1555,7 +1555,6 @@ async def login_submit(request: Request, password: str = Form(""), token: str = 
                 "request": request,
                 "mode": "login",
                 "has_password": _has_password(),
-                "token": GEN_TOKEN,
                 "error": "Invalid token or password.",
             },
             status_code=401,
@@ -1580,7 +1579,7 @@ async def set_password_page(request: Request):
     response = templates.TemplateResponse(
         request,
         "login.html",
-        {"request": request, "mode": "set_password", "has_password": _has_password(), "token": GEN_TOKEN, "error": None},
+        {"request": request, "mode": "set_password", "has_password": _has_password(), "error": None},
     )
     _set_csrf_cookie(response, request, _csrf_token_for_request(request))
     return response
@@ -1589,7 +1588,7 @@ async def set_password_page(request: Request):
 @app.post("/set-password")
 async def set_password_submit(
     request: Request,
-    token: str = Form(...),
+    token: str = Form(""),
     new_password: str = Form(...),
     confirm_password: str = Form(...),
 ):
@@ -1597,7 +1596,8 @@ async def set_password_submit(
     new_password = (new_password or "").strip()
     confirm_password = (confirm_password or "").strip()
 
-    if not secrets.compare_digest(token, GEN_TOKEN):
+    # Require token only when resetting an already-configured password.
+    if _has_password() and not secrets.compare_digest(token, GEN_TOKEN):
         response = templates.TemplateResponse(
             request,
             "login.html",
@@ -1605,7 +1605,6 @@ async def set_password_submit(
                 "request": request,
                 "mode": "set_password",
                 "has_password": _has_password(),
-                "token": GEN_TOKEN,
                 "error": "Invalid token. Copy/paste exactly.",
             },
             status_code=401,
@@ -1621,7 +1620,6 @@ async def set_password_submit(
                 "request": request,
                 "mode": "set_password",
                 "has_password": _has_password(),
-                "token": GEN_TOKEN,
                 "error": "Password must be at least 8 characters.",
             },
             status_code=400,
@@ -1637,7 +1635,6 @@ async def set_password_submit(
                 "request": request,
                 "mode": "set_password",
                 "has_password": _has_password(),
-                "token": GEN_TOKEN,
                 "error": "Passwords do not match.",
             },
             status_code=400,
@@ -1794,8 +1791,14 @@ async def settings_auth_password_set(new_password: str = Form(...), confirm_pass
 
 @app.post("/chat/settings/auth/token/rotate")
 async def settings_auth_token_rotate():
-    token = _rotate_login_token()
-    return JSONResponse({"ok": True, "token": token, "token_hint": token[-6:]})
+    _rotate_login_token()
+    return JSONResponse(
+        {
+            "ok": True,
+            "token_hint": GEN_TOKEN[-6:],
+            "message": "Login token rotated. Use the server-side token source to retrieve the full value.",
+        }
+    )
 
 
 @app.get("/chat/settings/providers")
@@ -1843,8 +1846,8 @@ async def settings_providers_set(
         _apply_secret("CHATGPT_CODEX_OAUTH_TOKEN", chatgpt_codex_oauth_token)
         _apply_path("OPENSIFT_CLAUDE_CODE_CMD", claude_code_cmd)
         _apply_path("OPENSIFT_CODEX_CMD", codex_cmd)
-    except ValueError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "invalid_provider_settings"}, status_code=400)
 
     if not updates and not removals:
         return JSONResponse(_provider_settings_snapshot())
@@ -1870,12 +1873,11 @@ async def settings_providers_set(
 async def settings_providers_install(target: str = Form(...)):
     try:
         result = await anyio.to_thread.run_sync(lambda: _install_provider_cli(target))
-    except ValueError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "invalid_install_target"}, status_code=400)
     except Exception as e:
         logger.exception("provider_cli_install_failed target=%s", target)
-        msg = str(e)
-        if msg == "npm_not_found":
+        if str(e) == "npm_not_found":
             return JSONResponse(
                 {
                     "ok": False,
@@ -1884,7 +1886,10 @@ async def settings_providers_install(target: str = Form(...)):
                 },
                 status_code=500,
             )
-        return JSONResponse({"ok": False, "error": "install_failed", "message": msg}, status_code=500)
+        return JSONResponse(
+            {"ok": False, "error": "install_failed", "message": "Provider CLI installation failed."},
+            status_code=500,
+        )
 
     return JSONResponse(_persist_installed_provider_cli(result))
 
@@ -1949,8 +1954,8 @@ async def session_import(owner: str = Form("default"), payload: str = Form(...),
             text = item.get("text")
             if role in ("user", "assistant") and isinstance(text, str):
                 cleaned.append(item)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": f"invalid_payload: {e}"}, status_code=400)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid_payload"}, status_code=400)
 
     if merge:
         _history_extend(owner, cleaned)
@@ -1992,8 +1997,8 @@ async def session_delete(owner: str = Form(...), delete_library_items: bool = Fo
                     await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
                 except Exception:
                     logger.exception("session_delete_vector_chunks_failed owner=%s item_id=%s", owner, item_id)
-            remove_source_file(str(removed.get("binary_path") or ""))
-            remove_source_file(str(removed.get("text_path") or ""))
+            remove_source_file(str(removed.get("binary_path") or ""), SOURCE_DIR)
+            remove_source_file(str(removed.get("text_path") or ""), SOURCE_DIR)
             deleted_library_count += 1
 
     return JSONResponse(
@@ -2378,7 +2383,7 @@ async def library_get(owner: str = "default", item_owner: str = "", item_id: str
     item = get_source_item(effective_owner, item_id, SOURCE_DIR)
     if not item:
         return JSONResponse({"ok": False, "error": "not_found"}, status_code=404)
-    text = read_source_text_blob(str(item.get("text_path") or ""))
+    text = read_source_text_blob(str(item.get("text_path") or ""), SOURCE_DIR)
     if not item.get("owner"):
         item = dict(item)
         item["owner"] = effective_owner
@@ -2742,8 +2747,8 @@ async def library_delete(owner: str = Form("default"), item_owner: str = Form(""
         except Exception:
             logger.exception("library_delete_vector_chunks_failed owner=%s item_id=%s", effective_owner, item_id)
 
-    remove_source_file(str(removed.get("binary_path") or ""))
-    remove_source_file(str(removed.get("text_path") or ""))
+    remove_source_file(str(removed.get("binary_path") or ""), SOURCE_DIR)
+    remove_source_file(str(removed.get("text_path") or ""), SOURCE_DIR)
     return JSONResponse({"ok": True, "owner": effective_owner, "item_id": item_id})
 
 
@@ -2886,8 +2891,8 @@ async def library_batch(request: Request):
                         await anyio.to_thread.run_sync(lambda: db.delete(chunk_ids))
                     except Exception:
                         logger.exception("library_batch_delete_vector_chunks_failed owner=%s item_id=%s", op_owner, item_id)
-                remove_source_file(str(item.get("binary_path") or ""))
-                remove_source_file(str(item.get("text_path") or ""))
+                remove_source_file(str(item.get("binary_path") or ""), SOURCE_DIR)
+                remove_source_file(str(item.get("text_path") or ""), SOURCE_DIR)
 
             if item and not item.get("owner"):
                 item = dict(item)
@@ -3276,8 +3281,8 @@ async def chat_stream(
     try:
         mode, provider, k, history_turns = _sanitize_post_params(mode, provider, k, history_turns)
         retrieval_mode, retrieval_depth = _sanitize_retrieval_params(retrieval_mode, retrieval_depth)
-    except ValueError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "invalid_request_params"}, status_code=400)
     effective_k = _effective_retrieval_k(k, retrieval_depth)
 
     requested_provider = provider
@@ -3439,7 +3444,7 @@ async def chat_stream(
                 item = get_source_item(owner, sid, SOURCE_DIR)
                 if not item:
                     continue
-                text = read_source_text_blob(str(item.get("text_path") or ""))
+                text = read_source_text_blob(str(item.get("text_path") or ""), SOURCE_DIR)
                 text = (text or "").strip()
                 if not text:
                     continue
