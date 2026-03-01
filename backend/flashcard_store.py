@@ -6,7 +6,6 @@ import re
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.atomic_io import atomic_write_json, path_lock
@@ -21,19 +20,14 @@ def _safe_owner(owner: str) -> str:
     return owner[:128]
 
 
-def _resolve_under_base(base_dir: str, name: str) -> str:
-    base = Path(base_dir).resolve()
-    candidate = (base / name).resolve()
-    try:
-        candidate.relative_to(base)
-    except ValueError as e:
-        raise ValueError("path_outside_base_dir") from e
-    return str(candidate)
-
-
 def _path(owner: str, base_dir: str = DEFAULT_DIR) -> str:
     os.makedirs(base_dir, exist_ok=True)
-    return _resolve_under_base(base_dir, f"{_safe_owner(owner)}.json")
+    base = os.path.abspath(base_dir)
+    filename = f"{_safe_owner(owner)}.json"
+    path = os.path.abspath(os.path.join(base, filename))
+    if os.path.commonpath([path, base]) != base:
+        raise ValueError("path_outside_base_dir")
+    return path
 
 
 def _now_dt() -> datetime:
