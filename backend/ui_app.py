@@ -95,7 +95,7 @@ os.makedirs("templates", exist_ok=True)
 
 AUTH_STATE_PATH = os.path.join(os.getcwd(), ".opensift_auth.json")
 ENV_FILE_PATH = os.path.join(os.getcwd(), ".env")
-OPENSIFT_VERSION = "1.6.2-alpha"
+OPENSIFT_VERSION = "1.6.3-alpha"
 CLI_TOOLS_PREFIX = os.path.join(os.getcwd(), ".opensift_tools")
 CLI_TOOLS_BIN_DIR = os.path.join(CLI_TOOLS_PREFIX, "bin")
 CLI_INSTALL_TIMEOUT_SECONDS = 420
