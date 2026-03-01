@@ -4,12 +4,7 @@
 Release date: 2026-03-01
 
 Security advisory release focused on remediation and hardening for URL ingest, path safety, exception/token exposure, and dependency risk.
-
-### Security Advisories (Draft GHSA)
-- SSRF hardening: `GHSA-635w-m3f9-gc48`
-- Path containment hardening: `GHSA-27x2-x9f5-xvp9`
-- Information disclosure hardening: `GHSA-h9x2-8x59-m6mh`
-- Vulnerable dependency set remediation: `GHSA-7wrf-jc6p-ffm5`
+This release incorporates the security hardening work merged via PR #67.
 
 ### Highlights
 - Hardened URL ingest destination controls:
