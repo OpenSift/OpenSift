@@ -168,6 +168,10 @@ def _validate_remote_url_sync(url: str) -> None:
         raise RuntimeError("Only http/https URLs are allowed.")
     if not parsed.hostname:
         raise RuntimeError("URL must include a hostname.")
+    if parsed.username or parsed.password:
+        raise RuntimeError("URLs with embedded credentials are not allowed.")
+    if parsed.port and parsed.port not in (80, 443):
+        raise RuntimeError("Only standard ports 80/443 are allowed for URL ingest.")
     if _is_blocked_host_label(parsed.hostname):
         raise RuntimeError("Local hostnames are blocked for URL ingest.")
 
@@ -373,6 +377,7 @@ async def _download_html_with_diagnostics(url: str) -> Tuple[str, Dict[str, Any]
 
     async with httpx.AsyncClient(follow_redirects=False, timeout=URL_TIMEOUT) as client:
         while True:
+            current_host = (urlparse(current_url).hostname or "").strip().lower().rstrip(".")
             if current_url in seen_urls:
                 raise RuntimeError("Redirect loop detected.")
             seen_urls.add(current_url)
@@ -399,7 +404,11 @@ async def _download_html_with_diagnostics(url: str) -> Tuple[str, Dict[str, Any]
             if _is_redirect_status(response.status_code):
                 if redirects >= MAX_URL_REDIRECTS:
                     raise RuntimeError(f"Too many redirects (>{MAX_URL_REDIRECTS}).")
-                current_url = _resolve_redirect_url(str(response.url), response.headers.get("location", ""))
+                next_url = _resolve_redirect_url(str(response.url), response.headers.get("location", ""))
+                next_host = (urlparse(next_url).hostname or "").strip().lower().rstrip(".")
+                if next_host != current_host:
+                    raise RuntimeError("Cross-host redirects are blocked for URL ingest.")
+                current_url = next_url
                 redirects += 1
                 diagnostics["redirect_count"] = redirects
                 diagnostics["final_url"] = current_url

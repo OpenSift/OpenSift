@@ -849,7 +849,11 @@
         const res = await fetch(u);
         if (!(await ensureAuth(res))) return;
         if (!res.ok) {
-          librarySelectListEl.innerHTML = `<div class="hint">Failed to load library sources.</div>`;
+          librarySelectListEl.innerHTML = "";
+          const hint = document.createElement("div");
+          hint.className = "hint";
+          hint.textContent = "Failed to load library sources.";
+          librarySelectListEl.appendChild(hint);
           return;
         }
         const data = await res.json();

@@ -9,7 +9,7 @@ from app.ingest import _validate_remote_url_sync
 
 def test_validate_remote_url_blocks_localhost() -> None:
     with pytest.raises(RuntimeError, match="blocked"):
-        _validate_remote_url_sync("http://localhost:8000/test")
+        _validate_remote_url_sync("http://localhost/test")
 
 
 def test_validate_remote_url_blocks_private_dns_resolution(monkeypatch: pytest.MonkeyPatch) -> None:

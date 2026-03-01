@@ -14,7 +14,8 @@ def normalize(text: str) -> str:
     text = text.replace("\u00a0", " ")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"[ \t]+\n", "\n", text)
+    # Trim trailing horizontal whitespace per line without regex backtracking risk.
+    text = "\n".join(line.rstrip(" \t") for line in text.split("\n"))
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 

@@ -5,6 +5,7 @@ import re
 import secrets
 import threading
 from glob import glob
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.atomic_io import atomic_write_json, path_lock
@@ -19,13 +20,23 @@ def _safe_owner(owner: str) -> str:
     return owner[:128]
 
 
+def _resolve_under_base(base_dir: str, *parts: str) -> str:
+    base = Path(base_dir).resolve()
+    candidate = (base.joinpath(*parts)).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as e:
+        raise ValueError("path_outside_base_dir") from e
+    return str(candidate)
+
+
 def _owner_manifest_path(owner: str, base_dir: str = DEFAULT_DIR) -> str:
     os.makedirs(base_dir, exist_ok=True)
-    return os.path.join(base_dir, f"{_safe_owner(owner)}.json")
+    return _resolve_under_base(base_dir, f"{_safe_owner(owner)}.json")
 
 
 def _owner_files_dir(owner: str, base_dir: str = DEFAULT_DIR) -> str:
-    path = os.path.join(base_dir, "_files", _safe_owner(owner))
+    path = _resolve_under_base(base_dir, "_files", _safe_owner(owner))
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -185,7 +196,8 @@ def batch_mutate_items(
 
 def write_text_blob(owner: str, source_id: str, text: str, base_dir: str = DEFAULT_DIR) -> str:
     files_dir = _owner_files_dir(owner, base_dir)
-    path = os.path.join(files_dir, f"{source_id}.txt")
+    safe_source_id = re.sub(r"[^a-zA-Z0-9._-]+", "_", (source_id or "").strip())[:120] or "source"
+    path = _resolve_under_base(files_dir, f"{safe_source_id}.txt")
     with _LOCK:
         parent = os.path.dirname(path)
         if parent:
@@ -195,9 +207,11 @@ def write_text_blob(owner: str, source_id: str, text: str, base_dir: str = DEFAU
     return path
 
 
-def read_text_blob(path: str) -> str:
+def read_text_blob(path: str, base_dir: str = DEFAULT_DIR) -> str:
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        resolved = Path(path or "").resolve()
+        resolved.relative_to(Path(base_dir).resolve())
+        with open(resolved, "r", encoding="utf-8") as f:
             return f.read()
     except Exception:
         return ""
@@ -205,8 +219,9 @@ def read_text_blob(path: str) -> str:
 
 def write_binary_blob(owner: str, source_id: str, filename: str, data: bytes, base_dir: str = DEFAULT_DIR) -> str:
     files_dir = _owner_files_dir(owner, base_dir)
+    safe_source_id = re.sub(r"[^a-zA-Z0-9._-]+", "_", (source_id or "").strip())[:120] or "source"
     safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", (filename or "upload").strip())[:180] or "upload"
-    path = os.path.join(files_dir, f"{source_id}__{safe}")
+    path = _resolve_under_base(files_dir, f"{safe_source_id}__{safe}")
     with _LOCK:
         parent = os.path.dirname(path)
         if parent:
@@ -216,9 +231,13 @@ def write_binary_blob(owner: str, source_id: str, filename: str, data: bytes, ba
     return path
 
 
-def remove_file(path: str) -> None:
+def remove_file(path: str, base_dir: str = DEFAULT_DIR) -> None:
     try:
-        if path and os.path.exists(path):
-            os.remove(path)
+        if not path:
+            return
+        resolved = Path(path).resolve()
+        resolved.relative_to(Path(base_dir).resolve())
+        if os.path.exists(resolved):
+            os.remove(resolved)
     except Exception:
         pass
